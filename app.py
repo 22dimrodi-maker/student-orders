@@ -9,12 +9,18 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 from reportlab.graphics.barcode import qr
 from reportlab.lib.utils import ImageReader
-
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
-pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
 
+# Register clean fonts for PDF (less "black" than Helvetica)
+try:
+    pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
+    FONT_REG = "DejaVuSans"
+    FONT_BLD = "DejaVuSans-Bold"
+except Exception:
+    FONT_REG = "Helvetica"
+    FONT_BLD = "Helvetica-Bold"
 
 st.set_page_config(page_title="Παραγγελίες Μαθητών", layout="wide")
 
@@ -38,25 +44,26 @@ if role == "Διαχειριστής":
     else:
         st.sidebar.warning("Πληκτρολόγησε σωστό PIN για λειτουργίες διαχείρισης.")
 
-# ---- Logo controls (ΜΟΝΟ για Διαχειριστή)
+# ---- Logo controls (κρυφά για Καταχώριση)
 st.sidebar.markdown("### Ρυθμίσεις εμφάνισης")
+if "logo_bytes" not in st.session_state:
+    if DEFAULT_LOGO.exists():
+        st.session_state["logo_bytes"] = DEFAULT_LOGO.read_bytes()
+    else:
+        st.session_state["logo_bytes"] = None
+
 if is_admin:
     st.sidebar.markdown("#### Λογότυπο & URL για QR")
     logo_file = st.sidebar.file_uploader("Ανέβασμα λογοτύπου (PNG/JPG)", type=["png","jpg","jpeg"], key="logo_up")
-    if "logo_bytes" not in st.session_state:
-        if DEFAULT_LOGO.exists():
-            st.session_state["logo_bytes"] = DEFAULT_LOGO.read_bytes()
-        else:
-            st.session_state["logo_bytes"] = None
     if logo_file is not None:
         st.session_state["logo_bytes"] = logo_file.read()
-    app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", st.secrets.get("APP_URL", os.getenv("APP_URL", "https://your-app-url-here")))
+    app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", APP_URL)
     if st.session_state.get("logo_bytes"):
         st.sidebar.image(st.session_state["logo_bytes"], caption="Λογότυπο", use_column_width=True)
 else:
-    app_url = st.secrets.get("APP_URL", os.getenv("APP_URL", "https://your-app-url-here"))
+    app_url = APP_URL
 
-# --- Top UI bar with logo preview (προβολή μόνο)
+# --- Top UI bar with logo preview (μόνο προβολή)
 def show_topbar():
     col_logo, col_title = st.columns([1, 6])
     with col_logo:
@@ -147,7 +154,7 @@ def to_excel_download(df_dict, filename="report.xlsx", label="⬇️ Λήψη Ex
             df.to_excel(writer, sheet_name=sheet[:31], index=False)
     return st.download_button(label, data=output.getvalue(), file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ---- PDF helpers (logo, footer with date/page/QR)
+# ---- PDF helpers (logo, footer with date/page/QR) using DejaVuSans
 def _draw_header_with_logo(c, title):
     width, height = A4
     left = 2*cm
@@ -162,9 +169,9 @@ def _draw_header_with_logo(c, title):
             title_x = left
     else:
         title_x = left
-    c.setFont("DejaVuSans-Bold", 14)
+    c.setFont(FONT_BLD, 14)
     c.drawString(title_x, top, title)
-    c.setFont("DejaVuSans", 9)
+    c.setFont(FONT_REG, 9)
     c.drawRightString(right, top, f"Ημερομηνία εξαγωγής: {pd.Timestamp.today().date()}")
     return top - 0.8*cm
 
@@ -173,7 +180,7 @@ def _draw_footer(c, page_num, app_url):
     left = 2*cm
     right = width - 2*cm
     bottom = 1.5*cm
-    c.setFont("DejaVuSans", 8)
+    c.setFont(FONT_REG, 8)
     c.drawString(left, bottom, f"Σελίδα {page_num}")
     c.drawRightString(right, bottom, f"Εκτύπωση: {pd.Timestamp.today().strftime('%Y-%m-%d %H:%M')}")
     if app_url and isinstance(app_url, str) and app_url.strip():
@@ -199,26 +206,26 @@ def pdf_grouped_by_school_student(df, title="Δελτίο"):
     grand_total = 0.0
     for school, g1 in df.groupby("school"):
         if y < 3*cm: y = _paginate_new_page(c, title, app_url)
-        c.setFont("DejaVuSans-Bold", 12)
+        c.setFont(FONT_BLD, 12)
         c.drawString(left, y, f"Σχολείο: {school or '—'}")
         y -= 0.6*cm
 
         school_total = 0.0
         for student, g2 in g1.groupby("student"):
             if y < 3*cm: y = _paginate_new_page(c, title, app_url)
-            c.setFont("DejaVuSans-Bold", 11)
+            c.setFont(FONT_BLD, 11)
             cls = (g2["class"].iloc[0] or "").strip()
             suffix = f" — Τάξη: {cls}" if cls else ""
             c.drawString(left, y, f"Μαθητής/-τρια: {student}{suffix}")
             y -= 0.5*cm
 
-            c.setFont("DejaVuSans-Bold", 9)
+            c.setFont(FONT_BLD, 9)
             c.drawString(left, y, "Προϊόν")
             c.drawRightString(right-6.5*cm, y, "Τιμή (€)")
             c.drawRightString(right-3.5*cm, y, "Ποσότητα")
             c.drawRightString(right-0.5*cm, y, "Σύνολο (€)")
             y -= 0.4*cm
-            c.setFont("DejaVuSans", 9)
+            c.setFont(FONT_REG, 9)
 
             subtotal = 0.0
             for _, row in g2.sort_values(["product"]).iterrows():
@@ -231,20 +238,20 @@ def pdf_grouped_by_school_student(df, title="Δελτίο"):
                 subtotal += float(row["total"] or 0)
 
             if y < 2*cm: y = _paginate_new_page(c, title, app_url)
-            c.setFont("DejaVuSans-Bold", 10)
+            c.setFont(FONT_BLD, 10)
             c.drawRightString(right-0.5*cm, y, f"Σύνολο {student}: {subtotal:.2f} €")
             y -= 0.5*cm
-            c.setFont("DejaVuSans", 9)
+            c.setFont(FONT_REG, 9)
             school_total += subtotal
 
         if y < 2*cm: y = _paginate_new_page(c, title, app_url)
-        c.setFont("DejaVuSans-Bold", 11)
+        c.setFont(FONT_BLD, 11)
         c.drawRightString(right-0.5*cm, y, f"Σύνολο Σχολείου: {school_total:.2f} €")
         y -= 0.7*cm
         grand_total += school_total
 
     if y < 2*cm: y = _paginate_new_page(c, title, app_url)
-    c.setFont("DejaVuSans-Bold", 12)
+    c.setFont(FONT_BLD, 12)
     c.drawRightString(right-0.5*cm, y, f"Γενικό Σύνολο: {grand_total:.2f} €")
 
     _draw_footer(c, c.getPageNumber(), app_url)
@@ -261,15 +268,15 @@ def pdf_products_report(df, title="Παραγγελία προς κατάστη�
     right = width - 2*cm
 
     y = _draw_header_with_logo(c, title)
-    c.setFont("DejaVuSans-Bold", 10)
+    c.setFont(FONT_BLD, 10)
     c.drawString(left, y, "Προϊόν")
     c.drawRightString(right-3*cm, y, "Σύνολο Ποσότητας")
     c.drawRightString(right-0.5*cm, y, "Σύνολο (€)")
     y -= 0.5*cm
 
+    c.setFont(FONT_REG, 10)
     for _, row in df.iterrows():
         if y < 2*cm: y = _paginate_new_page(c, title, app_url)
-        c.setFont("DejaVuSans", 10)
         c.drawString(left, y, str(row["product"]))
         c.drawRightString(right-3*cm, y, f"{int(row['qty'])}")
         c.drawRightString(right-0.5*cm, y, f"{row['total']:.2f}")
@@ -290,21 +297,21 @@ def pdf_table(df, title="Αναφορά", columns=None):
 
     y = _draw_header_with_logo(c, title)
     cols = columns or [(col, col, "L") for col in df.columns]
-    c.setFont("DejaVuSans-Bold", 9)
+    c.setFont(FONT_BLD, 9)
     step = (right-left) / len(cols)
     for i, (_c, head, _a) in enumerate(cols):
         c.drawString(left + i*step, y, str(head)[:22])
     y -= 0.45*cm
-    c.setFont("DejaVuSans", 9)
+    c.setFont(FONT_REG, 9)
 
     for _, row in df.iterrows():
         if y < 2*cm:
             y = _paginate_new_page(c, title, app_url)
-            c.setFont("DejaVuSans-Bold", 9)
+            c.setFont(FONT_BLD, 9)
             for i, (_c, head, _a) in enumerate(cols):
                 c.drawString(left + i*step, y, str(head)[:22])
             y -= 0.45*cm
-            c.setFont("DejaVuSans", 9)
+            c.setFont(FONT_REG, 9)
         for i, (col_key, _head, align) in enumerate(cols):
             val = row[col_key]
             if isinstance(val, (float, int)) and ("σύνολο" in _head.lower()):
@@ -416,7 +423,8 @@ elif page == "Μαθητές":
             s = st.text_input("Ονοματεπώνυμο")
         with c2:
             sch = st.text_input("Σχολείο", placeholder="π.χ. 1ο Γυμνάσιο")
-            st.empty()
+        with c3:
+            cl = st.text_input("Τάξη", placeholder="π.χ. Β1, Γ2...")
         submitted = st.form_submit_button("➕ Προσθήκη")
     if submitted and s.strip():
         exists = ((students["student"].str.lower()==s.strip().lower()) & (students["school"].str.lower()==sch.strip().lower()) & (students["class"].str.lower()==cl.strip().lower())).any()
@@ -511,11 +519,18 @@ elif page == "Παραγγελίες":
             with c3:
                 st.empty()
 
+            # reset 3 blank lines when student changes
+            if "last_student_label" not in st.session_state:
+                st.session_state["last_student_label"] = None
+            if st.session_state["last_student_label"] != label:
+                st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": ["", "", ""], "Ποσότητα": [1, 1, 1]})
+                st.session_state["last_student_label"] = label
+
             # Editor: πολλές γραμμές
             catalog = products["product"].tolist()
             if "order_editor_df" not in st.session_state:
                 st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
-            edited = st.data_editor(
+            st.data_editor(
                 st.session_state["order_editor_df"],
                 key="order_editor",
                 num_rows="dynamic",
@@ -525,11 +540,11 @@ elif page == "Παραγγελίες":
                 },
                 use_container_width=True
             )
-            st.session_state["order_editor_df"] = edited
 
-            # Υπολογισμός συνόλου παραγγελίας & συνόλου μαθητή (σήμερα)
+            # identify selected student pieces
             row = students.loc[students["label"]==label].iloc[0]
             s, sch, cl = row["student"], row["school"], row["class"]
+
             # σύνολο τρέχουσας φόρμας
             editor_df = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [], "Ποσότητα": []})).copy()
             subtotal = 0.0
@@ -551,7 +566,8 @@ elif page == "Παραγγελίες":
             st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
             st.caption(f"Σύνολο μαθητή για την {d}: {float(today_total):.2f} €")
 
-            cbtn1, cbtn2, cbtn3 = st.columns([1,1,6])
+            # buttons aligned under form
+            cbtn1, cbtn2, cbtn3 = st.columns([1,1,2])
             with cbtn1:
                 save_click = st.button("✅ Καταχώριση παραγγελίας")
             with cbtn2:
@@ -593,7 +609,7 @@ elif page == "Παραγγελίες":
                     save_orders(orders_latest)
                     st.session_state.setdefault("my_last_orders", [])
                     st.session_state["my_last_orders"].extend(new_ids)
-                    # καθάρισμα editor
+                    # reset editor
                     st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
                     st.success(f"Καταχωρήθηκαν {len(new_rows)} γραμμές ({subtotal:.2f} €).")
                     st.rerun()
@@ -602,6 +618,12 @@ elif page == "Παραγγελίες":
 
             if clear_click:
                 st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
+                st.rerun()
+
+            if add_row:
+                df_tmp = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})).copy()
+                df_tmp = pd.concat([df_tmp, pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})], ignore_index=True)
+                st.session_state["order_editor_df"] = df_tmp
                 st.rerun()
 
             st.divider()
@@ -615,105 +637,146 @@ elif page == "Παραγγελίες":
                     "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
                 })
                 st.dataframe(show, use_container_width=True)
-                del_sel = st.multiselect("Επίλεξε γραμμές για διαγραφή", show.index.tolist())
+                # επιλογή για διαγραφή πρόσφατων
+                idx_map = {i: oid for i, oid in zip(show.index, mine.loc[show.index, "order_id"])}
+                del_sel = st.multiselect("Επίλεξε γραμμές για διαγραφή", list(idx_map.keys()))
                 if st.button("🗑️ Διαγραφή επιλεγμένων"):
-                    orders = load_orders().copy()
-                    to_remove = mine.loc[del_sel, "order_id"].tolist()
-                    orders = orders[~orders["order_id"].isin(to_remove)]
-                    save_orders(orders)
+                    orders_all = load_orders().copy()
+                    to_remove = [idx_map[i] for i in del_sel]
+                    orders_all = orders_all[~orders_all["order_id"].isin(to_remove)]
+                    save_orders(orders_all)
                     st.session_state["my_last_orders"] = [x for x in my_ids if x not in to_remove]
                     st.success("Διαγράφηκαν οι επιλεγμένες γραμμές.")
                     st.rerun()
             else:
                 st.info("Δεν υπάρχουν πρόσφατες καταχωρήσεις από αυτή τη συνεδρία.")
 
-        # ----- TAB: Διόρθωση / Διαγραφή (admin ή και καταχώριση για δικές του)
-        with tabs[1]:
-            st.subheader("Διόρθωση / Διαγραφή")
-            products = load_products()
-            students = load_students()
-            orders = load_orders().copy()
+    # ----- TAB: Διόρθωση / Διαγραφή
+    with tabs[1]:
+        st.subheader("Διόρθωση / Διαγραφή")
+        products = load_products()
+        students = load_students()
+        orders = load_orders().copy()
 
-            # αν δεν είναι admin, φιλτράρω μόνο στις δικές του συνεδρίας για ασφάλεια
-            if not is_admin:
-                ids = st.session_state.get("my_last_orders", [])
-                orders = orders[orders["order_id"].isin(ids)].copy()
+        # για μη admin, δείχνουμε μόνο δικές του (τρέχουσα συνεδρία)
+        if not is_admin:
+            ids = st.session_state.get("my_last_orders", [])
+            orders = orders[orders["order_id"].isin(ids)].copy()
 
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
-            with c2:
-                f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
-            with c3:
-                f_class = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
+        with c2:
+            f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
+        with c3:
+            f_class = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
 
-            df = orders.copy()
-            if f_student: df = df[df["student"].isin(f_student)]
-            if f_school:  df = df[df["school"].isin(f_school)]
-            if f_class:   df = df[df["class"].isin(f_class)]
+        df = orders.copy()
+        if f_student: df = df[df["student"].isin(f_student)]
+        if f_school:  df = df[df["school"].isin(f_school)]
+        if f_class:   df = df[df["class"].isin(f_class)]
 
-            if df.empty:
-                st.info("Δεν βρέθηκαν γραμμές.")
-            else:
-                # dropdown επιλογής
-                df = df.sort_values("date", ascending=False).reset_index(drop=True)
-                df["label"] = df.apply(lambda r: f"{r['date'].date() if pd.notna(r['date']) else ''} • {r['student']} • {r['product']} (qty {int(r['qty']) if pd.notna(r['qty']) else ''})", axis=1)
-                mapping = dict(zip(df["label"], df["order_id"]))
-                choice = st.selectbox("Διάλεξε γραμμή", df["label"].tolist())
-                oid = mapping[choice]
-                row = df[df["order_id"]==oid].iloc[0]
+        if df.empty:
+            st.info("Δεν βρέθηκαν γραμμές.")
+        else:
+            df = df.sort_values("date", ascending=False).reset_index(drop=True)
+            df["label"] = df.apply(lambda r: f"{r['date'].date() if pd.notna(r['date']) else ''} • {r['student']} • {r['product']} (qty {int(r['qty']) if pd.notna(r['qty']) else ''})", axis=1)
+            mapping = dict(zip(df["label"], df["order_id"]))
+            choice = st.selectbox("Διάλεξε γραμμή", df["label"].tolist())
+            oid = mapping[choice]
+            row = df[df["order_id"]==oid].iloc[0]
 
-                with st.form("edit_line"):
-                    col1, col2, col3, col4, col5 = st.columns([1.2,1.5,2,1,1])
-                    with col1:
-                        new_date = st.date_input("Ημερομηνία", value=row["date"].date() if pd.notna(row["date"]) else date.today())
-                    with col2:
-                        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
-                        current_label = f"{row['student']} — {row['school']} — {row['class']}".strip(" —")
-                        sel_list = students["label"].tolist()
-                        idx = sel_list.index(current_label) if current_label in sel_list else 0
-                        new_label = st.selectbox("Μαθητής/-τρια", sel_list, index=idx)
-                    with col3:
-                        prods = products["product"].tolist()
-                        idxp = prods.index(row["product"]) if row["product"] in prods else 0
-                        new_product = st.selectbox("Προϊόν", prods, index=idxp)
-                    with col4:
-                        new_qty = st.number_input("Ποσότητα", min_value=1, step=1, value=int(row["qty"]) if pd.notna(row["qty"]) else 1)
-                    with col5:
-                        auto_price = float(products.loc[products["product"]==new_product, "price"].iloc[0]) if (products["product"]==new_product).any() else float(row["unit_price"] or 0.0)
-                        new_price = st.number_input("Τιμή", min_value=0.0, step=0.1, value=float(auto_price), format="%.2f")
+            with st.form("edit_line"):
+                col1, col2, col3, col4, col5 = st.columns([1.2,1.5,2,1,1])
+                with col1:
+                    new_date = st.date_input("Ημερομηνία", value=row["date"].date() if pd.notna(row["date"]) else date.today())
+                with col2:
+                    students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
+                    current_label = f"{row['student']} — {row['school']} — {row['class']}".strip(" —")
+                    sel_list = students["label"].tolist()
+                    idx = sel_list.index(current_label) if current_label in sel_list else 0
+                    new_label = st.selectbox("Μαθητής/-τρια", sel_list, index=idx)
+                with col3:
+                    prods = products["product"].tolist()
+                    idxp = prods.index(row["product"]) if row["product"] in prods else 0
+                    new_product = st.selectbox("Προϊόν", prods, index=idxp)
+                with col4:
+                    new_qty = st.number_input("Ποσότητα", min_value=1, step=1, value=int(row["qty"]) if pd.notna(row["qty"]) else 1)
+                with col5:
+                    auto_price = float(products.loc[products["product"]==new_product, "price"].iloc[0]) if (products["product"]==new_product).any() else float(row["unit_price"] or 0.0)
+                    new_price = st.number_input("Τιμή", min_value=0.0, step=0.1, value=float(auto_price), format="%.2f")
+                b1, b2, _ = st.columns([1,1,6])
+                with b1:
                     save_btn = st.form_submit_button("💾 Αποθήκευση αλλαγών")
-                del_btn = st.button("🗑️ Διαγραφή γραμμής")
+                with b2:
+                    del_btn = st.form_submit_button("🗑️ Διαγραφή γραμμής")
 
-                if save_btn:
-                    orders_all = load_orders().copy()
-                    orders_all.loc[orders_all["order_id"]==oid, "date"] = pd.to_datetime(new_date)
-                    parts = new_label.split(" — ")
-                    ns = parts[0]; nsch = parts[1] if len(parts)>1 else ""; ncl = parts[2] if len(parts)>2 else ""
-                    orders_all.loc[orders_all["order_id"]==oid, ["student","school","class"]] = [ns, nsch, ncl]
-                    orders_all.loc[orders_all["order_id"]==oid, ["product","qty","unit_price","total"]] = [new_product, new_qty, new_price, new_qty*new_price]
-                    save_orders(orders_all)
-                    st.success("Οι αλλαγές αποθηκεύτηκαν.")
-                    st.rerun()
+            if save_btn:
+                orders_all = load_orders().copy()
+                orders_all.loc[orders_all["order_id"]==oid, "date"] = pd.to_datetime(new_date)
+                parts = new_label.split(" — ")
+                ns = parts[0]; nsch = parts[1] if len(parts)>1 else ""; ncl = parts[2] if len(parts)>2 else ""
+                orders_all.loc[orders_all["order_id"]==oid, ["student","school","class"]] = [ns, nsch, ncl]
+                orders_all.loc[orders_all["order_id"]==oid, ["product","qty","unit_price","total"]] = [new_product, new_qty, new_price, new_qty*new_price]
+                save_orders(orders_all)
+                st.success("Οι αλλαγές αποθηκεύτηκαν.")
+                st.rerun()
 
-                if del_btn:
-                    orders_all = load_orders().copy()
-                    orders_all = orders_all[orders_all["order_id"]!=oid]
-                    save_orders(orders_all)
-                    st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
-                    st.success("Η γραμμή διαγράφηκε.")
-                    st.rerun()
+            if del_btn:
+                orders_all = load_orders().copy()
+                orders_all = orders_all[orders_all["order_id"]!=oid]
+                save_orders(orders_all)
+                st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
+                st.success("Η γραμμή διαγράφηκε.")
+                st.rerun()
 
+# --- Δελτία (PDF grouped ανά σχολείο/μαθητή)
+elif page == "Δελτία":
+    st.subheader("Δελτίο & Εκτύπωση PDF")
+    orders = load_orders()
+    if orders.empty:
+        st.info("Δεν υπάρχουν ακόμη παραγγελίες.")
+    else:
+        # Date range
+        col_date1, col_date2 = st.columns(2)
+        min_d = orders["date"].min().date() if pd.notna(orders["date"].min()) else date.today()
+        max_d = orders["date"].max().date() if pd.notna(orders["date"].max()) else date.today()
+        with col_date1:
+            d_from = st.date_input("Από", value=min_d, key="b_from")
+        with col_date2:
+            d_to = st.date_input("Έως", value=max_d, key="b_to")
 
-            st.divider()
-            st.markdown("#### Πρόσφατες γραμμές (προεπισκόπηση)")
-            prev = load_orders().sort_values("date", ascending=False).head(200)[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
-            "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
-            "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
-            })
-            st.dataframe(prev, use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sel_school = st.selectbox("Σχολείο (ή Όλα)", ["Όλα"] + sorted(orders["school"].dropna().unique().tolist()))
+        with c2:
+            df_for = orders if sel_school=="Όλα" else orders[orders["school"]==sel_school]
+            sel_class = st.selectbox("Τάξη (ή Όλες)", ["Όλες"] + sorted(df_for["class"].dropna().unique().tolist()))
+        with c3:
+            df_names = df_for if sel_class=="Όλες" else df_for[df_for["class"]==sel_class]
+            sel_student = st.selectbox("Μαθητής/-τρια (ή Όλοι/-ες)", ["Όλοι/-ες"] + sorted(df_names["student"].dropna().unique().tolist()))
 
-            # --- Σύνοψη (όπως πριν, ήδη με ελληνικές κεφαλίδες)
+        df = orders.copy()
+        df = df[(df["date"]>=pd.to_datetime(d_from)) & (df["date"]<=pd.to_datetime(d_to))]
+        if sel_school != "Όλα": df = df[df["school"] == sel_school]
+        if sel_class != "Όλες": df = df[df["class"] == sel_class]
+        if sel_student != "Όλοι/-ες": df = df[df["student"] == sel_student]
+
+        detail = df.groupby(["student","school","class","product","unit_price"], as_index=False).agg(
+            qty=("qty","sum"),
+            total=("total","sum")
+        ).sort_values(["school","class","student","product"])
+        st.dataframe(detail, use_container_width=True)
+
+        to_excel_download({
+            "Δελτίο αναλυτικό": detail
+        }, filename="δελτιο.xlsx")
+
+        if st.button("📄 Εξαγωγή PDF (ομαδοποιημένο ανά σχολείο/μαθητή)"):
+            buffer = pdf_grouped_by_school_student(detail, title="Δελτίο Παραγγελιών")
+            st.download_button("⬇️ Λήψη PDF", data=buffer.getvalue(), file_name="δελτιο.pdf", mime="application/pdf")
+
+# --- Σύνοψη
 elif page == "Σύνοψη":
     st.subheader("Σύνοψη & Αναφορές")
     orders = load_orders()
@@ -733,12 +796,13 @@ elif page == "Σύνοψη":
             students_filter = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
         with c2:
             products_filter = st.multiselect("Προϊόντα", sorted(orders["product"].dropna().unique().tolist()))
-            st.empty()
+        with c3:
+            schools_filter  = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
         with c4:
-            classes_filter = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
+            classes_filter  = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
 
         df = orders.copy()
-        df = df[(df["date"]>=pd.to_datetime(d_from)) & (df["date"]<=pd.to_datetime(d_to))]
+        df = df[(df["date"] >= pd.to_datetime(d_from)) & (df["date"] <= pd.to_datetime(d_to))]
         if students_filter: df = df[df["student"].isin(students_filter)]
         if products_filter: df = df[df["product"].isin(products_filter)]
         if schools_filter:  df = df[df["school"].isin(schools_filter)]
@@ -774,7 +838,9 @@ elif page == "Σύνοψη":
         by_product = df.groupby(["product"], as_index=False).agg(
             qty=("qty", "sum"),
             total=("total", "sum")
-        ).sort_values("qty", ascending=False).rename(columns={"product":"Προϊόν","qty":"Ποσότητα","total":"Σύνολο (€)"})
+        ).sort_values("qty", ascending=False).rename(columns={
+            "product":"Προϊόν","qty":"Ποσότητα","total":"Σύνολο (€)"
+        })
         st.dataframe(by_product, use_container_width=True)
 
         to_excel_download({
@@ -821,5 +887,6 @@ elif page == "Σύνοψη":
                 st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="ανα_σχολειο.pdf", mime="application/pdf")
         with colp4:
             if st.button("📄 PDF: Ανά προϊόν"):
-                pdfbuf = pdf_products_report(by_product.rename(columns={"Προϊόν":"product","Ποσότητα":"qty","Σύνολο (€)":"total"}), title="Παραγγελία προς κατάστημα")
+                src = by_product.rename(columns={"Προϊόν":"product","Ποσότητα":"qty","Σύνολο (€)":"total"})
+                pdfbuf = pdf_products_report(src, title="Παραγγελία προς κατάστημα")
                 st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="προς_κατάστημα.pdf", mime="application/pdf")

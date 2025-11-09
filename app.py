@@ -4,6 +4,9 @@ import pandas as pd
 import io
 from pathlib import Path
 from datetime import date
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import cm
 
 st.set_page_config(page_title="Παραγγελίες Μαθητών", layout="wide")
 
@@ -18,8 +21,8 @@ def load_products():
         df = pd.read_csv(PRODUCTS_PATH)
     else:
         df = pd.DataFrame(columns=["product","price"])
-    df["price"] = pd.to_numeric(df.get("price", 0), errors="coerce").fillna(0.0)
     df["product"] = df.get("product","").astype(str).str.strip()
+    df["price"] = pd.to_numeric(df.get("price", 0), errors="coerce").fillna(0.0)
     return df
 
 @st.cache_data
@@ -27,11 +30,13 @@ def load_students():
     if STUDENTS_PATH.exists():
         df = pd.read_csv(STUDENTS_PATH)
     else:
-        df = pd.DataFrame(columns=["student","school"])
-    if "school" not in df.columns:
-        df["school"] = ""
-    df["student"] = df.get("student", "").astype(str).str.strip()
-    df["school"] = df.get("school", "").astype(str).str.strip()
+        df = pd.DataFrame(columns=["student","school","class"])
+    for c in ["student","school","class"]:
+        if c not in df.columns:
+            df[c] = ""
+    df["student"] = df["student"].astype(str).str.strip()
+    df["school"] = df["school"].astype(str).str.strip()
+    df["class"] = df["class"].astype(str).str.strip()
     return df
 
 @st.cache_data
@@ -39,18 +44,16 @@ def load_orders():
     if ORDERS_PATH.exists():
         df = pd.read_csv(ORDERS_PATH, parse_dates=["date"])
     else:
-        df = pd.DataFrame(columns=["date","student","school","product","qty","unit_price","total"])
-    # Ensure columns
-    for c in ["date","student","school","product","qty","unit_price","total"]:
+        df = pd.DataFrame(columns=["date","student","school","class","product","qty","unit_price","total"])
+    for c in ["date","student","school","class","product","qty","unit_price","total"]:
         if c not in df.columns:
             df[c] = pd.NA
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
     for c in ["qty","unit_price","total"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df["student"] = df["student"].astype(str).str.strip()
-    df["school"] = df["school"].astype(str).str.strip()
-    df["product"] = df["product"].astype(str).str.strip()
+    for c in ["student","school","class","product"]:
+        df[c] = df[c].astype(str).str.strip()
     return df
 
 def save_products(df):
@@ -62,20 +65,20 @@ def save_products(df):
     load_products.clear()
 
 def save_students(df):
-    # Normalize to student, school
-    if "school" not in df.columns:
-        df["school"] = ""
-    df = df[["student","school"]].dropna().copy()
+    for c in ["student","school","class"]:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[["student","school","class"]].dropna().copy()
     df["student"] = df["student"].astype(str).str.strip()
     df["school"] = df["school"].astype(str).str.strip()
+    df["class"] = df["class"].astype(str).str.strip()
     df = df.loc[df["student"].str.len() > 0]
-    df = df.drop_duplicates(subset=["student","school"]).sort_values(["student","school"])
+    df = df.drop_duplicates(subset=["student","school","class"]).sort_values(["school","class","student"])
     df.to_csv(STUDENTS_PATH, index=False, encoding="utf-8-sig")
     load_students.clear()
 
 def save_orders(df):
-    # Ensure column order
-    cols = ["date","student","school","product","qty","unit_price","total"]
+    cols = ["date","student","school","class","product","qty","unit_price","total"]
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
@@ -90,12 +93,91 @@ def to_excel_download(df_dict, filename="report.xlsx"):
             df.to_excel(writer, sheet_name=sheet[:31], index=False)
     return st.download_button("⬇️ Λήψη Excel", data=output.getvalue(), file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+def pdf_grouped_by_school_student(df, title="Δελτίο"):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    left = 2*cm
+    right = width - 2*cm
+    y = height - 2*cm
+
+    def draw_header(page_title):
+        nonlocal y
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left, y, page_title)
+        c.setFont("Helvetica", 9)
+        c.drawRightString(right, y, f"Ημερομηνία εξαγωγής: {pd.Timestamp.today().date()}")
+        y -= 0.8*cm
+
+    def new_page(page_title):
+        nonlocal y
+        c.showPage()
+        y = height - 2*cm
+        draw_header(page_title)
+
+    draw_header(title)
+
+    grand_total = 0.0
+    for school, g1 in df.groupby("school"):
+        if y < 3*cm: new_page(title)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(left, y, f"Σχολείο: {school or '—'}")
+        y -= 0.6*cm
+
+        school_total = 0.0
+        for student, g2 in g1.groupby("student"):
+            if y < 3*cm: new_page(title)
+            c.setFont("Helvetica-Bold", 11)
+            cls = (g2["class"].iloc[0] or "").strip()
+            suffix = f" — Τάξη: {cls}" if cls else ""
+            c.drawString(left, y, f"Μαθητής/-τρια: {student}{suffix}")
+            y -= 0.5*cm
+
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(left, y, "Προϊόν")
+            c.drawRightString(right-6.5*cm, y, "Τιμή (€)")
+            c.drawRightString(right-3.5*cm, y, "Ποσότητα")
+            c.drawRightString(right-0.5*cm, y, "Σύνολο (€)")
+            y -= 0.4*cm
+            c.setFont("Helvetica", 9)
+
+            subtotal = 0.0
+            for _, row in g2.sort_values(["product"]).iterrows():
+                if y < 2*cm: new_page(title)
+                c.drawString(left, y, str(row["product"]))
+                c.drawRightString(right-6.5*cm, y, f"{row['unit_price']:.2f}")
+                c.drawRightString(right-3.5*cm, y, f"{int(row['qty']) if pd.notna(row['qty']) else ''}")
+                c.drawRightString(right-0.5*cm, y, f"{row['total']:.2f}")
+                y -= 0.35*cm
+                subtotal += float(row["total"] or 0)
+
+            if y < 2*cm: new_page(title)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawRightString(right-0.5*cm, y, f"Σύνολο {student}: {subtotal:.2f} €")
+            y -= 0.5*cm
+            c.setFont("Helvetica", 9)
+            school_total += subtotal
+
+        if y < 2*cm: new_page(title)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(right-0.5*cm, y, f"Σύνολο Σχολείου: {school_total:.2f} €")
+        y -= 0.7*cm
+        grand_total += school_total
+
+    if y < 2*cm: new_page(title)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawRightString(right-0.5*cm, y, f"Γενικό Σύνολο: {grand_total:.2f} €")
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer
+
 st.title("🍔 Παραγγελίες Μαθητών")
-st.caption("Μαθητές από πολλά σχολεία, παραγγελίες, διαγραφές και σύνοψη.")
+st.caption("Μαθητές από πολλά σχολεία, παραγγελίες, PDF δελτία και συνόψεις.")
 
 page = st.sidebar.radio("Μενού", ["Κατάλογος", "Μαθητές", "Παραγγελίες", "Σύνοψη", "Δελτία"], index=1)
 
-# --- Κατάλογος (με διαγραφή & μαζική διαγραφή) ---
+# --- Κατάλογος ---
 if page == "Κατάλογος":
     st.subheader("Τιμοκατάλογος")
     products = load_products().copy()
@@ -114,6 +196,34 @@ if page == "Κατάλογος":
             save_products(products)
             st.success("Προστέθηκε.")
             st.rerun()
+
+    st.markdown("**Ανέβασμα Excel προϊόντων (Προϊόν – Τιμή)**")
+    st.caption("Δεκτό .xlsx με επικεφαλίδες **Προϊόν** & **Τιμή**, ή αγγλικά `product` & `price`. Χωρίς επικεφαλίδες: 1η στήλη προϊόν, 2η τιμή.")
+    uplp = st.file_uploader("Επιλογή αρχείου Excel προϊόντων", type=["xlsx"], key="prod_excel")
+    if uplp is not None:
+        try:
+            xl = pd.ExcelFile(uplp)
+            frames = []
+            for sh in xl.sheet_names:
+                df = pd.read_excel(xl, sheet_name=sh)
+                lower = {str(c).strip(): str(c).strip().lower() for c in df.columns}
+                df = df.rename(columns=lower)
+                if "προϊόν" in df.columns and "τιμή" in df.columns:
+                    tmp = df.rename(columns={"προϊόν":"product","τιμή":"price"})[["product","price"]]
+                elif "product" in df.columns and "price" in df.columns:
+                    tmp = df[["product","price"]]
+                else:
+                    tmp = df.iloc[:, :2].copy()
+                    tmp.columns = ["product","price"]
+                frames.append(tmp)
+            merged = pd.concat(frames, ignore_index=True)
+            merged["product"] = merged["product"].astype(str).str.strip()
+            merged["price"] = pd.to_numeric(merged["price"], errors="coerce").fillna(0.0)
+            save_products(pd.concat([products, merged], ignore_index=True))
+            st.success("Ο τιμοκατάλογος ενημερώθηκε από το Excel.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Σφάλμα ανάγνωσης: {e}")
 
     st.markdown("#### Διαγραφή προϊόντος (μεμονωμένη)")
     if not products.empty:
@@ -140,32 +250,32 @@ if page == "Κατάλογος":
     st.markdown("#### Λίστα προϊόντων")
     st.dataframe(products, use_container_width=True)
 
-# --- Μαθητές (upload Excel με Ονοματεπώνυμο & Σχολείο + διαγραφή) ---
+# --- Μαθητές ---
 elif page == "Μαθητές":
-    st.subheader("Διαχείριση Μαθητών & Σχολείων")
+    st.subheader("Διαχείριση Μαθητών, Σχολείων & Τάξης")
     students = load_students().copy()
 
-    # Προσθήκη με φόρμα
     with st.form("add_student"):
         c1, c2, c3 = st.columns([2,2,1])
         with c1:
             s = st.text_input("Ονοματεπώνυμο")
         with c2:
             sch = st.text_input("Σχολείο", placeholder="π.χ. 1ο Γυμνάσιο")
+        with c3:
+            cl = st.text_input("Τάξη", placeholder="π.χ. Β1, Γ2...")
         submitted = st.form_submit_button("➕ Προσθήκη")
     if submitted and s.strip():
-        exists = ((students["student"].str.lower()==s.strip().lower()) & (students["school"].str.lower()==sch.strip().lower())).any()
+        exists = ((students["student"].str.lower()==s.strip().lower()) & (students["school"].str.lower()==sch.strip().lower()) & (students["class"].str.lower()==cl.strip().lower())).any()
         if exists:
             st.warning("Υπάρχει ήδη.")
         else:
-            students.loc[len(students)] = [s.strip(), sch.strip()]
+            students.loc[len(students)] = [s.strip(), sch.strip(), cl.strip()]
             save_students(students)
             st.success("Προστέθηκε.")
             st.rerun()
 
-    # Upload Excel με Ονοματεπώνυμο & Σχολείο
-    st.markdown("**Ανέβασμα Excel: Ονοματεπώνυμο & Σχολείο**")
-    st.caption("Δεκτό .xlsx με επικεφαλίδες **Ονοματεπώνυμο** και **Σχολείο** (ή χωρίς επικεφαλίδες: 1η στήλη Ονοματεπώνυμο, 2η Σχολείο). Γίνονται και αντιστοιχίσεις σε `student`/`school`.")
+    st.markdown("**Ανέβασμα Excel: Ονοματεπώνυμο – Σχολείο – Τάξη**")
+    st.caption("Δεκτό .xlsx με επικεφαλίδες **Ονοματεπώνυμο**, **Σχολείο**, **Τάξη**. Γίνονται και αντιστοιχίσεις σε `student`/`school`/`class`. Χωρίς headers: 1η στήλη Ονοματεπώνυμο, 2η Σχολείο, 3η Τάξη (προαιρετική).")
     upl = st.file_uploader("Επιλογή αρχείου Excel", type=["xlsx"])
     if upl is not None:
         try:
@@ -173,27 +283,33 @@ elif page == "Μαθητές":
             frames = []
             for sh in xl.sheet_names:
                 df = pd.read_excel(xl, sheet_name=sh)
-                # ομογενοποίηση ονομάτων στηλών
-                norm = {str(c).strip(): str(c).strip().lower() for c in df.columns}
-                df = df.rename(columns=norm)
-                # πρώτα προσπαθούμε ελληνικά headers
-                if "ονοματεπώνυμο" in df.columns and "σχολείο" in df.columns:
-                    tmp = df.rename(columns={"ονοματεπώνυμο":"student","σχολείο":"school"})[["student","school"]]
-                # μετά αγγλικά headers
+                lower = {str(c).strip(): str(c).strip().lower() for c in df.columns}
+                df = df.rename(columns=lower)
+                if "ονοματεπώνυμο" in df.columns:
+                    if "σχολείο" not in df.columns:
+                        df["σχολείο"] = ""
+                    if "τάξη" not in df.columns:
+                        df["τάξη"] = ""
+                    tmp = df.rename(columns={"ονοματεπώνυμο":"student","σχολείο":"school","τάξη":"class"})[["student","school","class"]]
                 elif "student" in df.columns:
                     if "school" not in df.columns:
                         df["school"] = ""
-                    tmp = df[["student","school"]]
+                    if "class" not in df.columns:
+                        df["class"] = ""
+                    tmp = df[["student","school","class"]]
                 else:
-                    # χωρίς headers -> παίρνουμε τις 2 πρώτες στήλες
-                    if df.shape[1] >= 2:
-                        tmp = df.iloc[:, :2].copy()
+                    tmp = df.copy()
+                    if tmp.shape[1] >= 3:
+                        tmp = tmp.iloc[:, :3]
+                        tmp.columns = ["student","school","class"]
+                    elif tmp.shape[1] == 2:
                         tmp.columns = ["student","school"]
+                        tmp["class"] = ""
                     else:
-                        tmp = df.iloc[:, :1].copy()
                         tmp.columns = ["student"]
                         tmp["school"] = ""
-                frames.append(tmp[["student","school"]])
+                        tmp["class"] = ""
+                frames.append(tmp[["student","school","class"]])
             merged = pd.concat(frames, ignore_index=True)
             save_students(pd.concat([students, merged], ignore_index=True))
             st.success("Οι μαθητές ενημερώθηκαν από το Excel.")
@@ -201,11 +317,10 @@ elif page == "Μαθητές":
         except Exception as e:
             st.error(f"Σφάλμα ανάγνωσης: {e}")
 
-    # Διαγραφή μεμονωμένου/ης
     st.markdown("#### Διαγραφή μαθητή/-ριας (μεμονωμένα)")
     if not students.empty:
         students = load_students().copy()
-        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']}" if str(r["school"]).strip() else r["student"], axis=1)
+        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
         sel = st.selectbox("Επίλεξε για διαγραφή", students["label"].tolist(), key="del_student_single")
         confirm = st.checkbox("✅ Επιβεβαίωση διαγραφής", key="confirm_st_single")
         if st.button("🗑️ Διαγραφή μαθητή/-ριας") and confirm:
@@ -218,20 +333,23 @@ elif page == "Μαθητές":
     else:
         st.info("Δεν υπάρχουν μαθητές.")
 
-    # Μαζική διαγραφή ανά σχολείο
-    st.markdown("#### Μαζική διαγραφή ανά σχολείο")
+    st.markdown("#### Μαζική διαγραφή ανά σχολείο/τάξη")
     all_students = load_students()
     schools = sorted([s for s in all_students["school"].dropna().unique().tolist() if str(s).strip()])
-    if schools:
-        sch_sel = st.multiselect("Επίλεξε σχολεία", schools, key="del_schools_multi")
-        confirm_bulk = st.checkbox("✅ Επιβεβαίωση μαζικής διαγραφής", key="confirm_st_bulk")
-        if st.button("🗑️ Διαγραφή όλων/ων από επιλεγμένα σχολεία") and sch_sel and confirm_bulk:
-            remain = all_students[~all_students["school"].isin(sch_sel)].reset_index(drop=True)
-            save_students(remain)
-            st.success(f"Διαγράφηκαν όλα τα άτομα από: {', '.join(sch_sel)}")
-            st.rerun()
-    else:
-        st.caption("Δεν υπάρχουν καταγεγραμμένα σχολεία για μαζική διαγραφή.")
+    col1, col2 = st.columns(2)
+    with col1:
+        sch_sel = st.multiselect("Σχολεία", schools, key="del_schools_multi")
+    with col2:
+        classes = sorted([c for c in all_students["class"].dropna().unique().tolist() if str(c).strip()])
+        cls_sel = st.multiselect("Τάξεις (προαιρετικά)", classes, key="del_classes_multi")
+    confirm_bulk = st.checkbox("✅ Επιβεβαίωση μαζικής διαγραφής", key="confirm_st_bulk")
+    if st.button("🗑️ Διαγραφή όλων/ων από επιλογές") and sch_sel and confirm_bulk:
+        remain = all_students[~all_students["school"].isin(sch_sel)].copy()
+        if cls_sel:
+            remain = all_students[~(all_students["school"].isin(sch_sel) & all_students["class"].isin(cls_sel))]
+        save_students(remain.reset_index(drop=True))
+        st.success("Ολοκληρώθηκε.")
+        st.rerun()
 
     st.markdown("#### Τρέχουσα λίστα")
     st.dataframe(load_students(), use_container_width=True)
@@ -247,7 +365,7 @@ elif page == "Παραγγελίες":
         st.info("Πρέπει να υπάρχουν μαθητές/τριες και προϊόντα.")
     else:
         students = students.copy()
-        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']}" if str(r["school"]).strip() else r["student"], axis=1)
+        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
         with st.form("add_order", clear_on_submit=True):
             c1, c2, c3, c4 = st.columns([2,2,1,1])
             with c1:
@@ -263,12 +381,14 @@ elif page == "Παραγγελίες":
             row = students.loc[students["label"]==label].iloc[0]
             s = row["student"]
             sch = row["school"]
+            cl = row["class"]
             unit_price = float(products.loc[products["product"]==p, "price"].iloc[0])
             total = unit_price * qty
             new = pd.DataFrame([{
                 "date": pd.to_datetime(d),
                 "student": s,
                 "school": sch,
+                "class": cl,
                 "product": p,
                 "qty": qty,
                 "unit_price": unit_price,
@@ -289,14 +409,15 @@ elif page == "Σύνοψη":
     if orders.empty:
         st.info("Δεν υπάρχουν ακόμη παραγγελίες.")
     else:
-        # φίλτρα
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             students_filter = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
         with c2:
             products_filter = st.multiselect("Προϊόντα", sorted(orders["product"].dropna().unique().tolist()))
         with c3:
             schools_filter = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
+        with c4:
+            classes_filter = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
 
         df = orders.copy()
         if students_filter:
@@ -305,13 +426,15 @@ elif page == "Σύνοψη":
             df = df[df["product"].isin(products_filter)]
         if schools_filter:
             df = df[df["school"].isin(schools_filter)]
+        if classes_filter:
+            df = df[df["class"].isin(classes_filter)]
 
         st.markdown("### Ανά μαθητή/-τρια")
-        by_student = df.groupby(["student","school"], as_index=False).agg(
+        by_student = df.groupby(["student","school","class"], as_index=False).agg(
             παραγγελίες=("total", "count"),
             ποσότητα=("qty", "sum"),
             σύνολο=("total", "sum")
-        ).sort_values(["school","student"])
+        ).sort_values(["school","class","student"])
         st.dataframe(by_student, use_container_width=True)
 
         st.markdown("### Ανά προϊόν")
@@ -325,70 +448,57 @@ elif page == "Σύνοψη":
         to_excel_download({
             "Ανά μαθητή": by_student,
             "Ανά προϊόν": by_product,
-            "Αναλυτικά": df.sort_values(["school","student","date"])
+            "Αναλυτικά": df.sort_values(["school","class","student","date"])
         }, filename="summary.xlsx")
 
 # --- Δελτία ---
 else:
-    st.subheader("Δελτίο")
-
+    st.subheader("Δελτίο & Εκτύπωση PDF")
     orders = load_orders()
-
     if orders.empty:
         st.info("Δεν υπάρχουν ακόμη παραγγελίες.")
     else:
-        # Φίλτρα
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             sel_school = st.selectbox("Σχολείο (ή Όλα)", ["Όλα"] + sorted(orders["school"].dropna().unique().tolist()))
         with c2:
-            df_students = orders if sel_school=="Όλα" else orders[orders["school"]==sel_school]
-            names = sorted(df_students["student"].dropna().unique().tolist())
-            sel_student = st.selectbox("Μαθητής/-τρια (ή Όλοι)", ["Όλοι"] + names)
+            df_for = orders if sel_school=="Όλα" else orders[orders["school"]==sel_school]
+            sel_class = st.selectbox("Τάξη (ή Όλες)", ["Όλες"] + sorted(df_for["class"].dropna().unique().tolist()))
+        with c3:
+            df_names = df_for if sel_class=="Όλες" else df_for[df_for["class"]==sel_class]
+            sel_student = st.selectbox("Μαθητής/-τρια (ή Όλοι/-ες)", ["Όλοι/-ες"] + sorted(df_names["student"].dropna().unique().tolist()))
 
         df = orders.copy()
         if sel_school != "Όλα":
             df = df[df["school"] == sel_school]
-        if sel_student != "Όλοι":
+        if sel_class != "Όλες":
+            df = df[df["class"] == sel_class]
+        if sel_student != "Όλοι/-ες":
             df = df[df["student"] == sel_student]
 
-        if sel_student != "Όλοι":
-            st.markdown(f"### Δελτίο: {sel_student} ({sel_school if sel_school!='Όλα' else df[df['student']==sel_student]['school'].iloc[0]})")
-            per_student = df.groupby(["student","school","product","unit_price"], as_index=False).agg(
-                qty=("qty","sum"),
-                total=("total","sum")
-            ).sort_values(["product"])
-            st.dataframe(per_student[["product","unit_price","qty","total"]], use_container_width=True)
-            total_sum = per_student["total"].sum()
-            st.markdown(f"**Σύνολο:** {total_sum:.2f} €")
-            to_excel_download({"Δελτίο": per_student}, filename=f"δελτιο_{sel_student}.xlsx")
-        else:
-            st.markdown("### Δελτίο: Όλοι/ες")
-            detail = df.groupby(["student","school","product","unit_price"], as_index=False).agg(
-                qty=("qty","sum"),
-                total=("total","sum")
-            ).sort_values(["school","student","product"])
-            st.dataframe(detail, use_container_width=True)
+        detail = df.groupby(["student","school","class","product","unit_price"], as_index=False).agg(
+            qty=("qty","sum"),
+            total=("total","sum")
+        ).sort_values(["school","class","student","product"])
+        st.dataframe(detail, use_container_width=True)
 
-            by_student = df.groupby(["student","school"], as_index=False).agg(
-                παραγγελίες=("total","count"),
-                ποσότητα=("qty","sum"),
-                σύνολο=("total","sum")
-            ).sort_values(["school","student"])
+        by_student = df.groupby(["student","school","class"], as_index=False).agg(
+            παραγγελίες=("total","count"),
+            ποσότητα=("qty","sum"),
+            σύνολο=("total","sum")
+        ).sort_values(["school","class","student"])
+        by_product = df.groupby(["product"], as_index=False).agg(
+            παραγγελίες=("total","count"),
+            ποσότητα=("qty","sum"),
+            σύνολο=("total","sum")
+        ).sort_values("σύνολο", ascending=False)
 
-            by_product = df.groupby("product", as_index=False).agg(
-                παραγγελίες=("total","count"),
-                ποσότητα=("qty","sum"),
-                σύνολο=("total","sum")
-            ).sort_values("σύνολο", ascending=False)
+        to_excel_download({
+            "Δελτίο αναλυτικό": detail,
+            "Σύνοψη ανά μαθητή": by_student,
+            "Σύνοψη ανά προϊόν": by_product
+        }, filename="δελτιο.xlsx")
 
-            st.markdown("#### Σύνοψη ανά μαθητή/-τρια")
-            st.dataframe(by_student, use_container_width=True)
-            st.markdown("#### Σύνοψη ανά προϊόν")
-            st.dataframe(by_product, use_container_width=True)
-
-            to_excel_download({
-                "Δελτίο αναλυτικό": detail,
-                "Σύνοψη ανά μαθητή": by_student,
-                "Σύνοψη ανά προϊόν": by_product
-            }, filename="δελτιο_ολων.xlsx")
+        if st.button("📄 Εξαγωγή PDF (ομαδοποιημένο ανά σχολείο/μαθητή)"):
+            buffer = pdf_grouped_by_school_student(detail, title="Δελτίο Παραγγελιών")
+            st.download_button("⬇️ Λήψη PDF", data=buffer.getvalue(), file_name="δελτιο.pdf", mime="application/pdf")

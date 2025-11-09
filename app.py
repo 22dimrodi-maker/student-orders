@@ -590,32 +590,6 @@ elif page == "Παραγγελίες":
                 subtotal += unit_price * qty
 
             st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
-
-            # Γρήγορα +/- στην ποσότητα ανά γραμμή
-            if not editor_df.empty:
-                for _row_idx in editor_df.index.tolist():
-                    cminus, cplus, _sp = st.columns([0.5,0.5,6])
-                    with cminus:
-                        if st.button("−", key=f"dec_qty_{_row_idx}"):
-                            df_tmp = st.session_state.get("order_editor_df", editor_df).copy()
-                            try:
-                                cur = int(float(df_tmp.loc[_row_idx, "Ποσότητα"])) if pd.notna(df_tmp.loc[_row_idx, "Ποσότητα"]) else 1
-                            except Exception:
-                                cur = 1
-                            df_tmp.loc[_row_idx, "Ποσότητα"] = max(1, cur-1)
-                            st.session_state["order_editor_df"] = df_tmp
-                            st.rerun()
-                    with cplus:
-                        if st.button("+", key=f"inc_qty_{_row_idx}"):
-                            df_tmp = st.session_state.get("order_editor_df", editor_df).copy()
-                            try:
-                                cur = int(float(df_tmp.loc[_row_idx, "Ποσότητα"])) if pd.notna(df_tmp.loc[_row_idx, "Ποσότητα"]) else 1
-                            except Exception:
-                                cur = 1
-                            df_tmp.loc[_row_idx, "Ποσότητα"] = cur+1
-                            st.session_state["order_editor_df"] = df_tmp
-                            st.rerun()
-
             # σύνολο μαθητή στην ημερομηνία
             today_total = orders[(orders["student"]==s) & (orders["date"].dt.date==d)].total.sum() if "total" in orders.columns else 0.0
             st.caption(f"Σύνολο μαθητή για την {d}: {float(today_total):.2f} €")
@@ -657,6 +631,21 @@ elif page == "Παραγγελίες":
                         "total": total
                     })
                     new_ids.append(oid)
+                # If no product lines, create a header-only placeholder line
+                if not new_rows:
+                    oid = str(uuid.uuid4())
+                    new_rows = [{
+                        "order_id": oid,
+                        "date": pd.to_datetime(d),
+                        "student": s,
+                        "school": sch,
+                        "class": cl,
+                        "product": "(χωρίς προϊόν)",
+                        "qty": 0,
+                        "unit_price": 0.0,
+                        "total": 0.0
+                    }]
+                    new_ids = [oid]
                 if new_rows:
                     orders_latest = load_orders().copy()
                     orders_latest = pd.concat([orders_latest, pd.DataFrame(new_rows)], ignore_index=True)
@@ -665,10 +654,10 @@ elif page == "Παραγγελίες":
                     st.session_state["my_last_orders"].extend(new_ids)
                     # reset editor
                     st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
-                    st.success(f"Καταχωρήθηκαν {len(new_rows)} γραμμές ({subtotal:.2f} €).")
+                    st.success("Η παραγγελία αποθηκεύτηκε.")
                     st.rerun()
                 else:
-                    st.warning("Δεν επιλέχθηκαν προϊόντα.")
+                    st.info("Αποθήκευση χωρίς γραμμές προϊόντων.")
 
             if clear_click:
                 st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})

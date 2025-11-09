@@ -99,6 +99,24 @@ def load_students():
     return df
 
 @st.cache_data
+
+def seed_demo_data():
+    """Create minimal demo data if products/students CSVs are empty/missing."""
+    prods = load_products()
+    studs = load_students()
+    changed = False
+    if prods.empty:
+        prods = pd.DataFrame([{"product":"Τοστ","price":2.0},{"product":"Χυμός","price":1.5}])
+        prods.to_csv(PRODUCTS_PATH, index=False, encoding="utf-8-sig")
+        load_products.clear()
+        changed = True
+    if studs.empty:
+        studs = pd.DataFrame([{"student":"Δείγμα Μαθητή/τρια","school":"Δείγμα Σχολείο","class":"Α1"}])
+        studs.to_csv(STUDENTS_PATH, index=False, encoding="utf-8-sig")
+        load_students.clear()
+        changed = True
+    return changed
+
 def load_orders():
     if ORDERS_PATH.exists():
         df = pd.read_csv(ORDERS_PATH, parse_dates=["date"])
@@ -506,8 +524,14 @@ elif page == "Παραγγελίες":
     # ----- TAB: Νέα παραγγελία
     with tabs[0]:
         st.subheader("Καταχώριση")
+        # diagnostics banner
+        st.caption(f"📦 Προϊόντα: {len(load_products())} • 👩‍🎓 Μαθητές: {len(load_students())}")
         if students.empty or products.empty:
-            st.info("Πρέπει να υπάρχουν μαθητές/τριες και προϊόντα.")
+            # try to seed demo data once
+            if seed_demo_data():
+                st.success("Φορτώθηκαν δείγματα προϊόντων/μαθητών για δοκιμή.")
+                st.rerun()
+            st.info("Πρέπει να υπάρχουν μαθητές/τριες και προϊόντα. Πήγαινε στο μενού ‘Κατάλογος’ και ‘Μαθητές’ (Ρόλος: Διαχειριστής) για εισαγωγή ή ανέβασμα Excel.")
         else:
             students = students.copy()
             students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
@@ -684,6 +708,7 @@ elif page == "Παραγγελίες":
     # ----- TAB: Διόρθωση / Διαγραφή
     with tabs[1]:
         st.subheader("Διόρθωση / Διαγραφή")
+        st.caption(f"📦 Προϊόντα: {len(load_products())} • 👩‍🎓 Μαθητές: {len(load_students())}")
         products = load_products()
         students = load_students()
         orders = load_orders().copy()

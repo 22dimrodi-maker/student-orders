@@ -416,8 +416,7 @@ elif page == "Μαθητές":
             s = st.text_input("Ονοματεπώνυμο")
         with c2:
             sch = st.text_input("Σχολείο", placeholder="π.χ. 1ο Γυμνάσιο")
-        with c3:
-            cl = st.text_input("Τάξη", placeholder="π.χ. Β1, Γ2...")
+            st.empty()
         submitted = st.form_submit_button("➕ Προσθήκη")
     if submitted and s.strip():
         exists = ((students["student"].str.lower()==s.strip().lower()) & (students["school"].str.lower()==sch.strip().lower()) & (students["class"].str.lower()==cl.strip().lower())).any()
@@ -510,7 +509,7 @@ elif page == "Παραγγελίες":
             with c2:
                 label = st.selectbox("Μαθητής/-τρια", students["label"].tolist(), key="order_student")
             with c3:
-    st.empty()
+                st.empty()
 
             # Editor: πολλές γραμμές
             catalog = products["product"].tolist()
@@ -634,8 +633,7 @@ if clear_click:
             f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
         with c2:
             f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
-        with c3:
-            f_class = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
+            st.empty()
 
         df = orders.copy()
         if f_student: df = df[df["student"].isin(f_student)]
@@ -723,8 +721,7 @@ elif page == "Σύνοψη":
             students_filter = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
         with c2:
             products_filter = st.multiselect("Προϊόντα", sorted(orders["product"].dropna().unique().tolist()))
-        with c3:
-            schools_filter = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
+            st.empty()
         with c4:
             classes_filter = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
 

@@ -520,8 +520,8 @@ elif page == "Παραγγελίες":
                 key="order_editor",
                 num_rows="dynamic",
                 column_config={
-                    "Προϊόν": st.column_config.SelectboxColumn("Προϊόν", options=catalog, required=False),
-                    "Ποσότητα": st.column_config.NumberColumn("Ποσότητα", min_value=1, step=1)
+                    "Προϊόν": st.column_config.SelectboxColumn("Προϊόν", options=catalog, required=True, help="Επιλογή προϊόντος"),
+                    "Ποσότητα": st.column_config.NumberColumn("Ποσότητα", min_value=1, step=1, help="Τουλάχιστον 1")
                 },
                 use_container_width=True
             )
@@ -531,10 +531,12 @@ elif page == "Παραγγελίες":
             row = students.loc[students["label"]==label].iloc[0]
             s, sch, cl = row["student"], row["school"], row["class"]
             # σύνολο τρέχουσας φόρμας
+            editor_df = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [], "Ποσότητα": []})).copy()
             subtotal = 0.0
-            for _, r in edited.dropna(subset=["Προϊόν"]).iterrows():
-                p = str(r["Προϊόν"]).strip()
-                if not p: continue
+            for _, r in editor_df.iterrows():
+                p = str(r.get("Προϊόν", "")).strip()
+                if not p:
+                    continue
                 val_qty = r.get("Ποσότητα", 1)
                 try:
                     qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
@@ -560,15 +562,16 @@ elif page == "Παραγγελίες":
             if save_click:
                 new_rows = []
                 new_ids = []
-                for _, r in edited.dropna(subset=["Προϊόν"]).iterrows():
-                    p = str(r["Προϊόν"]).strip()
-                    if not p:
+                editor_df = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [], "Ποσότητα": []})).copy()
+                for _, r in editor_df.iterrows():
+                    p = str(r.get("Προϊόν", "")).strip()
+                    if not p or p not in catalog:
                         continue
                     val_qty = r.get("Ποσότητα", 1)
-                try:
-                    qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
-                except Exception:
-                    qty = 1
+                    try:
+                        qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
+                    except Exception:
+                        qty = 1
                     unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
                     oid = str(uuid.uuid4())
                     total = unit_price * qty
@@ -585,10 +588,13 @@ elif page == "Παραγγελίες":
                     })
                     new_ids.append(oid)
                 if new_rows:
-                    orders = pd.concat([orders, pd.DataFrame(new_rows)], ignore_index=True)
-                    save_orders(orders)
+                    orders_latest = load_orders().copy()
+                    orders_latest = pd.concat([orders_latest, pd.DataFrame(new_rows)], ignore_index=True)
+                    save_orders(orders_latest)
                     st.session_state.setdefault("my_last_orders", [])
                     st.session_state["my_last_orders"].extend(new_ids)
+                    # καθάρισμα editor
+                    st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
                     st.success(f"Καταχωρήθηκαν {len(new_rows)} γραμμές ({subtotal:.2f} €).")
                     st.rerun()
                 else:

@@ -108,12 +108,12 @@ def seed_demo_data():
     if prods.empty:
         prods = pd.DataFrame([{"product":"Τοστ","price":2.0},{"product":"Χυμός","price":1.5}])
         prods.to_csv(PRODUCTS_PATH, index=False, encoding="utf-8-sig")
-        load_products.clear()
+        load_products.clear() if hasattr(load_products, 'clear') else None
         changed = True
     if studs.empty:
         studs = pd.DataFrame([{"student":"Δείγμα Μαθητή/τρια","school":"Δείγμα Σχολείο","class":"Α1"}])
         studs.to_csv(STUDENTS_PATH, index=False, encoding="utf-8-sig")
-        load_students.clear()
+        load_students.clear() if hasattr(load_students, 'clear') else None
         changed = True
     return changed
 
@@ -141,7 +141,7 @@ def save_products(df):
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
     df = df.dropna().drop_duplicates(subset=["product"]).sort_values("product")
     df.to_csv(PRODUCTS_PATH, index=False, encoding="utf-8-sig")
-    load_products.clear()
+    load_products.clear() if hasattr(load_products, 'clear') else None
 
 def save_students(df):
     for c in ["student","school","class"]:
@@ -154,7 +154,7 @@ def save_students(df):
     df = df.loc[df["student"].str.len() > 0]
     df = df.drop_duplicates(subset=["student","school","class"]).sort_values(["school","class","student"])
     df.to_csv(STUDENTS_PATH, index=False, encoding="utf-8-sig")
-    load_students.clear()
+    load_students.clear() if hasattr(load_students, 'clear') else None
 
 def save_orders(df):
     cols = ["order_id","date","student","school","class","product","qty","unit_price","total"]
@@ -163,7 +163,7 @@ def save_orders(df):
             df[c] = pd.NA
     df = df[cols]
     df.to_csv(ORDERS_PATH, index=False, encoding="utf-8-sig")
-    load_orders.clear()
+    load_orders.clear() if hasattr(load_orders, 'clear') else None
 
 def to_excel_download(df_dict, filename="report.xlsx", label="⬇️ Λήψη Excel"):
     output = io.BytesIO()

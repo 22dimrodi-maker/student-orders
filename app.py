@@ -588,33 +588,33 @@ if clear_click:
     st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
     st.rerun()
 
-            st.divider()
-            st.markdown("#### Δικές μου πρόσφατες καταχωρήσεις (αυτής της συνεδρίας)")
-            my_ids = st.session_state.get("my_last_orders", [])
-            if my_ids:
-                mine = load_orders().copy()
-                mine = mine[mine["order_id"].isin(my_ids)]
-                # κρύψε order_id, βάλε ελληνικές κεφαλίδες
-                show = mine[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
-                    "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
-                    "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
-                })
-                st.dataframe(show, use_container_width=True)
-                del_sel = st.multiselect("Επίλεξε γραμμές για διαγραφή", show.index.tolist())
-                if st.button("🗑️ Διαγραφή επιλεγμένων"):
-                    orders = load_orders().copy()
-                    ids_to_del = mine.loc[del_sel, :].index
-                    # map indices back to order_ids
-                    order_ids_to_del = mine.loc[del_sel, :].assign(oid=mine.loc[del_sel, :].index).index
-                    # simpler: find by merged keys
-                    to_remove = mine.loc[del_sel, "order_id"].tolist()
-                    orders = orders[~orders["order_id"].isin(to_remove)]
-                    save_orders(orders)
-                    st.session_state["my_last_orders"] = [x for x in my_ids if x not in to_remove]
-                    st.success("Διαγράφηκαν οι επιλεγμένες γραμμές.")
-                    st.rerun()
-            else:
-                st.info("Δεν υπάρχουν πρόσφατες καταχωρήσεις από αυτή τη συνεδρία.")
+    st.divider()
+    st.markdown("#### Δικές μου πρόσφατες καταχωρήσεις (αυτής της συνεδρίας)")
+    my_ids = st.session_state.get("my_last_orders", [])
+    if my_ids:
+        mine = load_orders().copy()
+        mine = mine[mine["order_id"].isin(my_ids)]
+        # κρύψε order_id, βάλε ελληνικές κεφαλίδες
+        show = mine[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
+            "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
+            "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
+        })
+        st.dataframe(show, use_container_width=True)
+        del_sel = st.multiselect("Επίλεξε γραμμές για διαγραφή", show.index.tolist())
+        if st.button("🗑️ Διαγραφή επιλεγμένων"):
+            orders = load_orders().copy()
+            ids_to_del = mine.loc[del_sel, :].index
+            # map indices back to order_ids
+            order_ids_to_del = mine.loc[del_sel, :].assign(oid=mine.loc[del_sel, :].index).index
+            # simpler: find by merged keys
+            to_remove = mine.loc[del_sel, "order_id"].tolist()
+            orders = orders[~orders["order_id"].isin(to_remove)]
+            save_orders(orders)
+            st.session_state["my_last_orders"] = [x for x in my_ids if x not in to_remove]
+            st.success("Διαγράφηκαν οι επιλεγμένες γραμμές.")
+            st.rerun()
+    else:
+        st.info("Δεν υπάρχουν πρόσφατες καταχωρήσεις από αυτή τη συνεδρία.")
 
     # ----- TAB: Διόρθωση / Διαγραφή (admin ή και καταχώριση για δικές του)
     with tabs[1]:

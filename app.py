@@ -598,6 +598,19 @@ elif page == "Παραγγελίες":
         else:
             df = df.sort_values("date", ascending=False).reset_index(drop=True)
             df["label"] = df.apply(lambda r: f"{r['date'].date() if pd.notna(r['date']) else ''} • {r['student']} • {r['product']} (qty {int(r['qty']) if pd.notna(r['qty']) and int(r['qty'])>0 else ''})", axis=1)
+            # ---- Μαζική διαγραφή παραγγελιών
+            st.markdown("#### Μαζική διαγραφή παραγγελιών")
+            bulk_sel = st.multiselect("Επίλεξε γραμμές", df["label"].tolist(), key="bulk_orders_select")
+            confirm_bulk = st.checkbox("✅ Επιβεβαίωση μαζικής διαγραφής", key="bulk_orders_confirm")
+            if st.button("🗑️ Διαγραφή επιλεγμένων παραγγελιών") and bulk_sel and confirm_bulk:
+                oids = df.loc[df["label"].isin(bulk_sel), "order_id"].tolist()
+                orders_all = load_orders().copy()
+                orders_all = orders_all[~orders_all["order_id"].isin(oids)]
+                save_orders(orders_all)
+                if not is_admin:
+                    st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x not in oids]
+                st.success(f"Διαγράφηκαν {len(oids)} γραμμές.")
+                st.rerun()
             mapping = dict(zip(df["label"], df["order_id"]))
             choice = st.selectbox("Διάλεξε γραμμή", df["label"].tolist())
             oid = mapping[choice]

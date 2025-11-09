@@ -628,7 +628,8 @@ elif page == "Παραγγελίες":
                 f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
             with c2:
                 f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
-                st.empty()
+            with c3:
+                f_class = st.multiselect("Τάξεις", sorted(orders["class"].dropna().unique().tolist()))
 
             df = orders.copy()
             if f_student: df = df[df["student"].isin(f_student)]

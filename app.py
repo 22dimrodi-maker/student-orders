@@ -535,7 +535,11 @@ elif page == "Παραγγελίες":
             for _, r in edited.dropna(subset=["Προϊόν"]).iterrows():
                 p = str(r["Προϊόν"]).strip()
                 if not p: continue
-                qty = int(r.get("Ποσότητα", 1) or 1)
+                val_qty = r.get("Ποσότητα", 1)
+                try:
+                    qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
+                except Exception:
+                    qty = 1
                 unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
                 subtotal += unit_price * qty
 
@@ -550,6 +554,8 @@ elif page == "Παραγγελίες":
                 save_click = st.button("✅ Καταχώριση παραγγελίας")
             with cbtn2:
                 clear_click = st.button("🧹 Νέα παραγγελία")
+            with cbtn3:
+                add_row = st.button("➕ Προσθήκη γραμμής")
 
             if save_click:
                 new_rows = []
@@ -558,7 +564,11 @@ elif page == "Παραγγελίες":
                     p = str(r["Προϊόν"]).strip()
                     if not p:
                         continue
-                    qty = int(r.get("Ποσότητα", 1) or 1)
+                    val_qty = r.get("Ποσότητα", 1)
+                try:
+                    qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
+                except Exception:
+                    qty = 1
                     unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
                     oid = str(uuid.uuid4())
                     total = unit_price * qty

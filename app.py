@@ -498,7 +498,7 @@ elif page == "Μαθητές":
     # Μαζική διαγραφή μαθητών/τριών
     st.markdown("#### Μαζική διαγραφή μαθητών/τριών")
     students_all = load_students().copy()
-    students_all["label"] = students_all.apply(lambda r: f\"{r['student']} — {r['school']} — {r['class']}\" if (str(r[\"school\"]).strip() or str(r[\"class\"]).strip()) else r[\"student\"], axis=1)
+    students_all["label"] = students_all.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
     to_multi = st.multiselect("Επέλεξε από τη λίστα", students_all["label"].tolist(), key="del_student_multi")
     confirm_multi = st.checkbox("✅ Επιβεβαίωση μαζικής", key="confirm_st_multi")
     if st.button("🗑️ Διαγραφή επιλεγμένων μαθητών/τριών") and to_multi and confirm_multi:

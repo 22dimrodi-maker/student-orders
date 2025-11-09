@@ -245,112 +245,23 @@ def pdf_grouped_by_school_student(df, title="Δελτίο"):
             y -= 0.4*cm
             c.setFont(FONT_REG, 9)
 
-            subtotal = float(editor_df.get("Μερικό (€)", pd.Series(dtype=float)).sum()) if "Μερικό (€)" in editor_df.columns else 0.0
+            subtotal = 0.0
+            for _, row in g2.sort_values(["product"]).iterrows():
+                if y < 2*cm: y = _paginate_new_page(c, title, app_url)
+                c.drawString(left, y, str(row["product"]))
+                c.drawRightString(right-6.5*cm, y, f"{float(row['unit_price'] or 0):.2f}")
+                c.drawRightString(right-3.5*cm, y, f"{int(row['qty']) if pd.notna(row['qty']) else ''}")
+                c.drawRightString(right-0.5*cm, y, f"{float(row['total'] or 0):.2f}")
+                y -= 0.35*cm
+                subtotal += float(row.get("total", 0) or 0)
 
-            st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
-            # σύνολο μαθητή στην ημερομηνία
-            today_total = orders[(orders["student"]==s) & (orders["date"].dt.date==d)].total.sum() if "total" in orders.columns else 0.0
-            st.caption(f"Σύνολο μαθητή για την {d}: {float(today_total):.2f} €")
+            if y < 2*cm: y = _paginate_new_page(c, title, app_url)
+            c.setFont(FONT_BLD, 10)
+            c.drawRightString(right-0.5*cm, y, f"Σύνολο {student}: {subtotal:.2f} €")
+            y -= 0.5*cm
+            c.setFont(FONT_REG, 9)
+            school_total += subtotal
 
-            # buttons aligned under form
-            cbtn1, cbtn2, cbtn3 = st.columns([1,1,2])
-            with cbtn1:
-                save_click = st.button("✅ Καταχώριση παραγγελίας")
-            with cbtn2:
-                clear_click = st.button("🧹 Νέα παραγγελία")
-            with cbtn3:
-                add_row = st.button("➕ Προσθήκη γραμμής")
-
-            if save_click:
-                new_rows = []
-                new_ids = []
-                editor_df = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [], "Ποσότητα": []})).copy()
-                for _, r in editor_df.iterrows():
-                    p = str(r.get("Προϊόν", "")).strip()
-                    if not p or p not in catalog:
-                        continue
-                    val_qty = r.get("Ποσότητα", 1)
-                    try:
-                        qty = int(float(val_qty)) if pd.notna(val_qty) and str(val_qty).strip() != '' else 1
-                    except Exception:
-                        qty = 1
-                    unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
-                    oid = str(uuid.uuid4())
-                    total = unit_price * qty
-                    new_rows.append({
-                        "order_id": oid,
-                        "date": pd.to_datetime(d),
-                        "student": s,
-                        "school": sch,
-                        "class": cl,
-                        "product": p,
-                        "qty": qty,
-                        "unit_price": unit_price,
-                        "total": total
-                    })
-                    new_ids.append(oid)
-                # If no product lines, create a header-only placeholder line
-                if not new_rows:
-                    oid = str(uuid.uuid4())
-                    new_rows = [{
-                        "order_id": oid,
-                        "date": pd.to_datetime(d),
-                        "student": s,
-                        "school": sch,
-                        "class": cl,
-                        "product": "(χωρίς προϊόν)",
-                        "qty": 0,
-                        "unit_price": 0.0,
-                        "total": 0.0
-                    }]
-                    new_ids = [oid]
-                if new_rows:
-                    orders_latest = load_orders().copy()
-                    orders_latest = pd.concat([orders_latest, pd.DataFrame(new_rows)], ignore_index=True)
-                    save_orders(orders_latest)
-                    st.session_state.setdefault("my_last_orders", [])
-                    st.session_state["my_last_orders"].extend(new_ids)
-                    # reset editor
-                    st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1], "Μερικό (€)": [0.0]})
-                    st.success("Η παραγγελία αποθηκεύτηκε.")
-                    st.rerun()
-                else:
-                    st.info("Αποθήκευση χωρίς γραμμές προϊόντων.")
-
-            if clear_click:
-                st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1], "Μερικό (€)": [0.0]})
-                st.rerun()
-
-            if add_row:
-                df_tmp = st.session_state.get("order_editor_df", pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1], "Μερικό (€)": [0.0]})).copy()
-                df_tmp = pd.concat([df_tmp, pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1], "Μερικό (€)": [0.0]})], ignore_index=True)
-                st.session_state["order_editor_df"] = df_tmp
-                st.rerun()
-
-            st.divider()
-            st.markdown("#### Δικές μου πρόσφατες καταχωρήσεις (αυτής της συνεδρίας)")
-            my_ids = st.session_state.get("my_last_orders", [])
-            if my_ids:
-                mine = load_orders().copy()
-                mine = mine[mine["order_id"].isin(my_ids)]
-                show = mine[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
-                    "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
-                    "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
-                })
-                st.dataframe(show, use_container_width=True)
-                # επιλογή για διαγραφή πρόσφατων
-                idx_map = {i: oid for i, oid in zip(show.index, mine.loc[show.index, "order_id"])}
-                del_sel = st.multiselect("Επίλεξε γραμμές για διαγραφή", list(idx_map.keys()))
-                if st.button("🗑️ Διαγραφή επιλεγμένων"):
-                    orders_all = load_orders().copy()
-                    to_remove = [idx_map[i] for i in del_sel]
-                    orders_all = orders_all[~orders_all["order_id"].isin(to_remove)]
-                    save_orders(orders_all)
-                    st.session_state["my_last_orders"] = [x for x in my_ids if x not in to_remove]
-                    st.success("Διαγράφηκαν οι επιλεγμένες γραμμές.")
-                    st.rerun()
-            else:
-                st.info("Δεν υπάρχουν πρόσφατες καταχωρήσεις από αυτή τη συνεδρία.")
 
     # ----- TAB: Διόρθωση / Διαγραφή
     with tabs[1]:

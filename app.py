@@ -510,9 +510,7 @@ elif page == "Παραγγελίες":
             with c2:
                 label = st.selectbox("Μαθητής/-τρια", students["label"].tolist(), key="order_student")
             with c3:
-                if st.button("🧹 Νέα (καθαρισμός)"):
-                    st.session_state.pop("order_editor_df", None)
-                    st.rerun()
+    st.empty()
 
             # Editor: πολλές γραμμές
             catalog = products["product"].tolist()
@@ -548,48 +546,48 @@ elif page == "Παραγγελίες":
             st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
             st.caption(f"Σύνολο μαθητή για την {d}: {float(today_total):.2f} €")
 
-            cbtn1, cbtn2 = st.columns([1,1])
-            with cbtn1:
-                save_click = st.button("✅ Καταχώριση παραγγελίας")
-            with cbtn2:
-                clear_click = st.button("🔁 Νέα παραγγελία")
+            cbtn1, cbtn2, cbtn3 = st.columns([1,1,6])
+with cbtn1:
+    save_click = st.button("✅ Καταχώριση παραγγελίας")
+with cbtn2:
+    clear_click = st.button("🧹 Νέα παραγγελία")
 
-            if save_click:
-                new_rows = []
-                new_ids = []
-                for _, r in edited.dropna(subset=["Προϊόν"]).iterrows():
-                    p = str(r["Προϊόν"]).strip()
-                    if not p: 
-                        continue
-                    qty = int(r.get("Ποσότητα", 1) or 1)
-                    unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
-                    oid = str(uuid.uuid4())
-                    total = unit_price * qty
-                    new_rows.append({
-                        "order_id": oid,
-                        "date": pd.to_datetime(d),
-                        "student": s,
-                        "school": sch,
-                        "class": cl,
-                        "product": p,
-                        "qty": qty,
-                        "unit_price": unit_price,
-                        "total": total
-                    })
-                    new_ids.append(oid)
-                if new_rows:
-                    orders = pd.concat([orders, pd.DataFrame(new_rows)], ignore_index=True)
-                    save_orders(orders)
-                    st.session_state.setdefault("my_last_orders", [])
-                    st.session_state["my_last_orders"].extend(new_ids)
-                    st.success(f"Καταχωρήθηκαν {len(new_rows)} γραμμές ({subtotal:.2f} €).")
-                    st.rerun()
-                else:
-                    st.warning("Δεν επιλέχθηκαν προϊόντα.")
+if save_click:
+    new_rows = []
+    new_ids = []
+    for _, r in edited.dropna(subset=["Προϊόν"]).iterrows():
+        p = str(r["Προϊόν"]).strip()
+        if not p: 
+            continue
+        qty = int(r.get("Ποσότητα", 1) or 1)
+        unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
+        oid = str(uuid.uuid4())
+        total = unit_price * qty
+        new_rows.append({
+            "order_id": oid,
+            "date": pd.to_datetime(d),
+            "student": s,
+            "school": sch,
+            "class": cl,
+            "product": p,
+            "qty": qty,
+            "unit_price": unit_price,
+            "total": total
+        })
+        new_ids.append(oid)
+    if new_rows:
+        orders = pd.concat([orders, pd.DataFrame(new_rows)], ignore_index=True)
+        save_orders(orders)
+        st.session_state.setdefault("my_last_orders", [])
+        st.session_state["my_last_orders"].extend(new_ids)
+        st.success(f"Καταχωρήθηκαν {len(new_rows)} γραμμές ({subtotal:.2f} €).")
+        st.rerun()
+    else:
+        st.warning("Δεν επιλέχθηκαν προϊόντα.")
 
-            if clear_click:
-                st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
-                st.experimental_rerun()
+if clear_click:
+    st.session_state["order_editor_df"] = pd.DataFrame({"Προϊόν": [""], "Ποσότητα": [1]})
+    st.rerun()
 
             st.divider()
             st.markdown("#### Δικές μου πρόσφατες καταχωρήσεις (αυτής της συνεδρίας)")
@@ -689,13 +687,13 @@ elif page == "Παραγγελίες":
                 st.rerun()
 
             if del_btn:
-                orders_all = load_orders().copy()
-                orders_all = orders_all[orders_all["order_id"]!=oid]
-                save_orders(orders_all)
-                # αφαίρεση από session "my_last_orders"
-                st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
-                st.success("Η γραμμή διαγράφηκε.")
-                st.rerun()
+    orders_all = load_orders().copy()
+    orders_all = orders_all[orders_all["order_id"]!=oid]
+    save_orders(orders_all)
+    st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
+    st.success("Η γραμμή διαγράφηκε.")
+    st.rerun()
+
 
     st.divider()
     st.markdown("#### Πρόσφατες γραμμές (προεπισκόπηση)")

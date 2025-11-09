@@ -685,12 +685,12 @@ if clear_click:
                 st.rerun()
 
             if del_btn:
-    orders_all = load_orders().copy()
-    orders_all = orders_all[orders_all["order_id"]!=oid]
-    save_orders(orders_all)
-    st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
-    st.success("Η γραμμή διαγράφηκε.")
-    st.rerun()
+                orders_all = load_orders().copy()
+                orders_all = orders_all[orders_all["order_id"]!=oid]
+                save_orders(orders_all)
+                st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
+                st.success("Η γραμμή διαγράφηκε.")
+                st.rerun()
 
 
     st.divider()

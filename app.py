@@ -613,90 +613,90 @@ elif page == "Παραγγελίες":
 
         # ----- TAB: Διόρθωση / Διαγραφή (admin ή και καταχώριση για δικές του)
         with tabs[1]:
-        st.subheader("Διόρθωση / Διαγραφή")
-        products = load_products()
-        students = load_students()
-        orders = load_orders().copy()
+            st.subheader("Διόρθωση / Διαγραφή")
+            products = load_products()
+            students = load_students()
+            orders = load_orders().copy()
 
-        # αν δεν είναι admin, φιλτράρω μόνο στις δικές του συνεδρίας για ασφάλεια
-        if not is_admin:
-            ids = st.session_state.get("my_last_orders", [])
-            orders = orders[orders["order_id"].isin(ids)].copy()
+            # αν δεν είναι admin, φιλτράρω μόνο στις δικές του συνεδρίας για ασφάλεια
+            if not is_admin:
+                ids = st.session_state.get("my_last_orders", [])
+                orders = orders[orders["order_id"].isin(ids)].copy()
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
-        with c2:
-            f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
-            st.empty()
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                f_student = st.multiselect("Μαθητές/-τριες", sorted(orders["student"].dropna().unique().tolist()))
+            with c2:
+                f_school = st.multiselect("Σχολεία", sorted(orders["school"].dropna().unique().tolist()))
+                st.empty()
 
-        df = orders.copy()
-        if f_student: df = df[df["student"].isin(f_student)]
-        if f_school:  df = df[df["school"].isin(f_school)]
-        if f_class:   df = df[df["class"].isin(f_class)]
+            df = orders.copy()
+            if f_student: df = df[df["student"].isin(f_student)]
+            if f_school:  df = df[df["school"].isin(f_school)]
+            if f_class:   df = df[df["class"].isin(f_class)]
 
-        if df.empty:
-            st.info("Δεν βρέθηκαν γραμμές.")
-        else:
-            # dropdown επιλογής
-            df = df.sort_values("date", ascending=False).reset_index(drop=True)
-            df["label"] = df.apply(lambda r: f"{r['date'].date() if pd.notna(r['date']) else ''} • {r['student']} • {r['product']} (qty {int(r['qty']) if pd.notna(r['qty']) else ''})", axis=1)
-            mapping = dict(zip(df["label"], df["order_id"]))
-            choice = st.selectbox("Διάλεξε γραμμή", df["label"].tolist())
-            oid = mapping[choice]
-            row = df[df["order_id"]==oid].iloc[0]
+            if df.empty:
+                st.info("Δεν βρέθηκαν γραμμές.")
+            else:
+                # dropdown επιλογής
+                df = df.sort_values("date", ascending=False).reset_index(drop=True)
+                df["label"] = df.apply(lambda r: f"{r['date'].date() if pd.notna(r['date']) else ''} • {r['student']} • {r['product']} (qty {int(r['qty']) if pd.notna(r['qty']) else ''})", axis=1)
+                mapping = dict(zip(df["label"], df["order_id"]))
+                choice = st.selectbox("Διάλεξε γραμμή", df["label"].tolist())
+                oid = mapping[choice]
+                row = df[df["order_id"]==oid].iloc[0]
 
-            with st.form("edit_line"):
-                col1, col2, col3, col4, col5 = st.columns([1.2,1.5,2,1,1])
-                with col1:
-                    new_date = st.date_input("Ημερομηνία", value=row["date"].date() if pd.notna(row["date"]) else date.today())
-                with col2:
-                    students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
-                    current_label = f"{row['student']} — {row['school']} — {row['class']}".strip(" —")
-                    sel_list = students["label"].tolist()
-                    idx = sel_list.index(current_label) if current_label in sel_list else 0
-                    new_label = st.selectbox("Μαθητής/-τρια", sel_list, index=idx)
-                with col3:
-                    prods = products["product"].tolist()
-                    idxp = prods.index(row["product"]) if row["product"] in prods else 0
-                    new_product = st.selectbox("Προϊόν", prods, index=idxp)
-                with col4:
-                    new_qty = st.number_input("Ποσότητα", min_value=1, step=1, value=int(row["qty"]) if pd.notna(row["qty"]) else 1)
-                with col5:
-                    auto_price = float(products.loc[products["product"]==new_product, "price"].iloc[0]) if (products["product"]==new_product).any() else float(row["unit_price"] or 0.0)
-                    new_price = st.number_input("Τιμή", min_value=0.0, step=0.1, value=float(auto_price), format="%.2f")
-                save_btn = st.form_submit_button("💾 Αποθήκευση αλλαγών")
-            del_btn = st.button("🗑️ Διαγραφή γραμμής")
+                with st.form("edit_line"):
+                    col1, col2, col3, col4, col5 = st.columns([1.2,1.5,2,1,1])
+                    with col1:
+                        new_date = st.date_input("Ημερομηνία", value=row["date"].date() if pd.notna(row["date"]) else date.today())
+                    with col2:
+                        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
+                        current_label = f"{row['student']} — {row['school']} — {row['class']}".strip(" —")
+                        sel_list = students["label"].tolist()
+                        idx = sel_list.index(current_label) if current_label in sel_list else 0
+                        new_label = st.selectbox("Μαθητής/-τρια", sel_list, index=idx)
+                    with col3:
+                        prods = products["product"].tolist()
+                        idxp = prods.index(row["product"]) if row["product"] in prods else 0
+                        new_product = st.selectbox("Προϊόν", prods, index=idxp)
+                    with col4:
+                        new_qty = st.number_input("Ποσότητα", min_value=1, step=1, value=int(row["qty"]) if pd.notna(row["qty"]) else 1)
+                    with col5:
+                        auto_price = float(products.loc[products["product"]==new_product, "price"].iloc[0]) if (products["product"]==new_product).any() else float(row["unit_price"] or 0.0)
+                        new_price = st.number_input("Τιμή", min_value=0.0, step=0.1, value=float(auto_price), format="%.2f")
+                    save_btn = st.form_submit_button("💾 Αποθήκευση αλλαγών")
+                del_btn = st.button("🗑️ Διαγραφή γραμμής")
 
-            if save_btn:
-                orders_all = load_orders().copy()
-                orders_all.loc[orders_all["order_id"]==oid, "date"] = pd.to_datetime(new_date)
-                parts = new_label.split(" — ")
-                ns = parts[0]; nsch = parts[1] if len(parts)>1 else ""; ncl = parts[2] if len(parts)>2 else ""
-                orders_all.loc[orders_all["order_id"]==oid, ["student","school","class"]] = [ns, nsch, ncl]
-                orders_all.loc[orders_all["order_id"]==oid, ["product","qty","unit_price","total"]] = [new_product, new_qty, new_price, new_qty*new_price]
-                save_orders(orders_all)
-                st.success("Οι αλλαγές αποθηκεύτηκαν.")
-                st.rerun()
+                if save_btn:
+                    orders_all = load_orders().copy()
+                    orders_all.loc[orders_all["order_id"]==oid, "date"] = pd.to_datetime(new_date)
+                    parts = new_label.split(" — ")
+                    ns = parts[0]; nsch = parts[1] if len(parts)>1 else ""; ncl = parts[2] if len(parts)>2 else ""
+                    orders_all.loc[orders_all["order_id"]==oid, ["student","school","class"]] = [ns, nsch, ncl]
+                    orders_all.loc[orders_all["order_id"]==oid, ["product","qty","unit_price","total"]] = [new_product, new_qty, new_price, new_qty*new_price]
+                    save_orders(orders_all)
+                    st.success("Οι αλλαγές αποθηκεύτηκαν.")
+                    st.rerun()
 
-            if del_btn:
-                orders_all = load_orders().copy()
-                orders_all = orders_all[orders_all["order_id"]!=oid]
-                save_orders(orders_all)
-                st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
-                st.success("Η γραμμή διαγράφηκε.")
-                st.rerun()
+                if del_btn:
+                    orders_all = load_orders().copy()
+                    orders_all = orders_all[orders_all["order_id"]!=oid]
+                    save_orders(orders_all)
+                    st.session_state["my_last_orders"] = [x for x in st.session_state.get("my_last_orders", []) if x != oid]
+                    st.success("Η γραμμή διαγράφηκε.")
+                    st.rerun()
 
 
-    st.divider()
-    st.markdown("#### Πρόσφατες γραμμές (προεπισκόπηση)")
-    prev = load_orders().sort_values("date", ascending=False).head(200)[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
-        "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
-        "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
-    })
-    st.dataframe(prev, use_container_width=True)
+            st.divider()
+            st.markdown("#### Πρόσφατες γραμμές (προεπισκόπηση)")
+            prev = load_orders().sort_values("date", ascending=False).head(200)[["date","student","school","class","product","qty","unit_price","total"]].rename(columns={
+            "date":"Ημερομηνία","student":"Μαθητής/-τρια","school":"Σχολείο","class":"Τάξη",
+            "product":"Προϊόν","qty":"Ποσότητα","unit_price":"Τιμή (€)","total":"Σύνολο (€)"
+            })
+            st.dataframe(prev, use_container_width=True)
 
-# --- Σύνοψη (όπως πριν, ήδη με ελληνικές κεφαλίδες)
+            # --- Σύνοψη (όπως πριν, ήδη με ελληνικές κεφαλίδες)
 elif page == "Σύνοψη":
     st.subheader("Σύνοψη & Αναφορές")
     orders = load_orders()

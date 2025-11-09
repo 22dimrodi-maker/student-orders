@@ -535,7 +535,7 @@ elif page == "Παραγγελίες":
                 key="order_editor",
                 num_rows="dynamic",
                 column_config={
-                    "Προϊόν": st.column_config.SelectboxColumn("Προϊόν", options=catalog, required=True, help="Επιλογή προϊόντος"),
+                    "Προϊόν": st.column_config.SelectboxColumn(\"Προϊόν\", options=catalog, required=False, help=\"Επιλογή προϊόντος\"),
                     "Ποσότητα": st.column_config.NumberColumn("Ποσότητα", min_value=1, step=1, help="Τουλάχιστον 1")
                 },
                 use_container_width=True
@@ -559,6 +559,32 @@ elif page == "Παραγγελίες":
                     qty = 1
                 unit_price = float(products.loc[products["product"]==p, "price"].iloc[0]) if (products["product"]==p).any() else 0.0
                 subtotal += unit_price * qty
+
+            st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
+            # Γρήγορα +/- στην ποσότητα ανά γραμμή
+            if not editor_df.empty:
+                for _row_idx in editor_df.index.tolist():
+                    cminus, cplus, _sp = st.columns([0.5,0.5,6])
+                    with cminus:
+                        if st.button("−", key=f"dec_qty_{_row_idx}"):
+                            df_tmp = st.session_state.get("order_editor_df", editor_df).copy()
+                            try:
+                                cur = int(float(df_tmp.loc[_row_idx, "Ποσότητα"])) if pd.notna(df_tmp.loc[_row_idx, "Ποσότητα"]) else 1
+                            except Exception:
+                                cur = 1
+                            df_tmp.loc[_row_idx, "Ποσότητα"] = max(1, cur-1)
+                            st.session_state["order_editor_df"] = df_tmp
+                            st.rerun()
+                    with cplus:
+                        if st.button("+", key=f"inc_qty_{_row_idx}"):
+                            df_tmp = st.session_state.get("order_editor_df", editor_df).copy()
+                            try:
+                                cur = int(float(df_tmp.loc[_row_idx, "Ποσότητα"])) if pd.notna(df_tmp.loc[_row_idx, "Ποσότητα"]) else 1
+                            except Exception:
+                                cur = 1
+                            df_tmp.loc[_row_idx, "Ποσότητα"] = cur+1
+                            st.session_state["order_editor_df"] = df_tmp
+                            st.rerun()
 
             # σύνολο μαθητή στην ημερομηνία
             today_total = orders[(orders["student"]==s) & (orders["date"].dt.date==d)].total.sum() if "total" in orders.columns else 0.0

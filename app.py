@@ -24,6 +24,15 @@ except Exception:
 
 st.set_page_config(page_title="Παραγγελίες Μαθητών", layout="wide")
 
+# --- One-time init/seed to avoid infinite reruns ---
+if not st.session_state.get("__inited_once__"):
+    try:
+        seed_demo_data()
+    except Exception:
+        pass
+    st.session_state["__inited_once__"] = True
+
+
 # ---- Paths & Config
 DATA_DIR = Path(".")
 PRODUCTS_PATH = DATA_DIR / "products.csv"
@@ -273,10 +282,8 @@ def pdf_grouped_by_school_student(df, title="Δελτίο"):
 
         # για μη admin, δείχνουμε μόνο δικές του (τρέχουσα συνεδρία)
         if not is_admin:
-            only_mine = st.checkbox("Εμφάνιση μόνο των δικών μου καταχωρίσεων (συνεδρία)", value=True)
-            if only_mine:
-                ids = st.session_state.get("my_last_orders", [])
-                orders = orders[orders["order_id"].isin(ids)].copy()
+            ids = st.session_state.get("my_last_orders", [])
+            orders = orders[orders["order_id"].isin(ids)].copy()
 
         c1, c2, c3 = st.columns(3)
         with c1:

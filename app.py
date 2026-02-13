@@ -735,7 +735,7 @@ elif page == "Μαθητές":
     st.markdown("#### Διαγραφές")
     if not students.empty:
         students = load_students().copy()
-        students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
+            # removed buggy label assignment
         sel = st.selectbox("Διαγραφή μεμονωμένου/ης", students["label"].tolist(), key="del_student_single")
         confirm = st.checkbox("✅ Επιβεβαίωση", key="confirm_st_single")
         if st.button("🗑️ Διαγραφή") and confirm:
@@ -787,7 +787,7 @@ elif page == "Παραγγελίες":
                 key="sort_mode_entry"
             )
 students = students.copy()
-            students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
+            # removed buggy label assignment
             c1, c2 = st.columns([1.2,3])
             with c1:
                 d = st.date_input("Ημερομηνία", value=date.today(), key="order_date")
@@ -1045,7 +1045,7 @@ students = students.copy()
                 with col1:
                     new_date = st.date_input("Ημερομηνία", value=row["date"].date() if pd.notna(row["date"]) else date.today())
                 with col2:
-                    students["label"] = students.apply(lambda r: f"{r['student']} — {r['school']} — {r['class']}" if (str(r["school"]).strip() or str(r["class"]).strip()) else r["student"], axis=1)
+            # removed buggy label assignment
                     current_label = f"{row['student']} — {row['school']} — {row['class']}".strip(" —")
                     sel_list = students["label"].tolist()
                     idx = sel_list.index(current_label) if current_label in sel_list else 0

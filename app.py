@@ -585,8 +585,10 @@ if not is_admin:
     pages = ["Παραγγελίες", "Σύνοψη", "Δελτία"]
 page = st.sidebar.radio("Μενού", pages, index=0)
 
-# ---------------- Κατάλογος ----------------
-if page == "Κατάλογος":
+
+# ---------------- Page renderers (modular) ----------------
+
+def render_catalog(is_admin: bool):
     if not is_admin:
         st.error("Μόνο διαχειριστής/ρια.")
         st.stop()
@@ -661,8 +663,8 @@ if page == "Κατάλογος":
     st.markdown("#### Λίστα προϊόντων")
     st.dataframe(products.rename(columns={"product":"Προϊόν","price":"Τιμή (€)"}), use_container_width=True)
 
-# ---------------- Μαθητές ----------------
-elif page == "Μαθητές":
+
+def render_students(is_admin: bool):
     if not is_admin:
         st.error("Μόνο διαχειριστής/ρια.")
         st.stop()
@@ -762,8 +764,8 @@ elif page == "Μαθητές":
     st.markdown("#### Τρέχουσα λίστα")
     st.dataframe(load_students().rename(columns={"student":"Ονοματεπώνυμο","school":"Σχολείο","class":"Τάξη"}), use_container_width=True)
 
-# ---------------- Παραγγελίες ----------------
-elif page == "Παραγγελίες":
+
+def render_orders(is_admin: bool):
     products = load_products()
     students = load_students()
     orders = load_orders().copy()
@@ -777,7 +779,7 @@ elif page == "Παραγγελίες":
         if students.empty or products.empty:
             st.info("Πρέπει να υπάρχουν μαθητές/τριες και προϊόντα. Συμπλήρωσέ τα από τα μενού ‘Κατάλογος’ και ‘Μαθητές’.")
         else:
-            
+        
             # Τρόπος ταξινόμησης μαθητών/τριών στην καταχώριση
             sort_mode = st.radio(
                 "Ταξινόμηση μαθητών/τριών",
@@ -786,7 +788,7 @@ elif page == "Παραγγελίες":
                 index=1,
                 key="sort_mode_entry"
             )
-students = students.copy()
+    students = students.copy()
             # removed buggy label assignment
             c1, c2 = st.columns([1.2,3])
             with c1:
@@ -1085,8 +1087,8 @@ students = students.copy()
                 st.success("Η γραμμή διαγράφηκε.")
                 st.rerun()
 
-# ---------------- Σύνοψη ----------------
-elif page == "Σύνοψη":
+
+def render_summary(is_admin: bool):
     st.subheader("Σύνοψη & Αναφορές")
     orders = load_orders()
     if orders.empty:
@@ -1219,8 +1221,8 @@ elif page == "Σύνοψη":
             st.success(f"Διαγράφηκαν {len(oids)} γραμμές.")
             st.rerun()
 
-# ---------------- Δελτία ----------------
-elif page == "Δελτία":
+
+def render_bulletins(is_admin: bool):
     st.subheader("Δελτίο & Εκτύπωση PDF")
     orders = load_orders()
     if orders.empty:
@@ -1264,3 +1266,19 @@ elif page == "Δελτία":
         if st.button("📄 Εξαγωγή PDF (ομαδοποιημένο ανά σχολείο/μαθητή)"):
             buffer = pdf_grouped_by_school_student(detail, title="Δελτίο Παραγγελιών")
             st.download_button("⬇️ Λήψη PDF", data=buffer.getvalue(), file_name="δελτιο.pdf", mime="application/pdf")
+
+
+# ---------------- Dispatch ----------------
+PAGE_RENDERERS = {
+    "Κατάλογος": render_catalog,
+    "Μαθητές": render_students,
+    "Παραγγελίες": render_orders,
+    "Σύνοψη": render_summary,
+    "Δελτία": render_bulletins,
+}
+
+renderer = PAGE_RENDERERS.get(page)
+if renderer:
+    renderer(is_admin=is_admin)
+else:
+    st.error("Άγνωστη σελίδα.")

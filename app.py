@@ -39,8 +39,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 # =========================
 # Simple credentials (Option 2)
 # =========================
-APP_PASSWORD = "12345"   # change this
-ADMIN_PIN = "4321"       # change this (admin features)
+APP_PASSWORD = "1966"   # change this
+ADMIN_PIN = "1966"       # change this (admin features)
 
 APP_TITLE = "Παραγγελίες Μαθητών"
 APP_URL_DEFAULT = ""     # optional, used for QR if you want
@@ -107,10 +107,89 @@ def _safe_clear_cache(fn) -> None:
     except Exception:
         pass
 
+def dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicate column names (keep first) to keep Streamlit/pyarrow happy."""
+    if df is None or df.empty:
+        return df
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+    return df
+
+def clean_products_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a products dataframe to columns: product, price."""
+    df = dedupe_columns(df.copy())
+    # normalize column names
+    cols = [str(c).strip().lower() for c in df.columns]
+    df.columns = cols
+    # map common greek headers
+    rename_map = {
+        "προϊόν": "product",
+        "προιον": "product",
+        "product": "product",
+        "τιμή": "price",
+        "τιμη": "price",
+        "τιμή (€)": "price",
+        "τιμη (€)": "price",
+        "price": "price",
+    }
+    df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
+    if "product" not in df.columns:
+        df = df.rename(columns={df.columns[0]: "product"})
+    if "price" not in df.columns:
+        if len(df.columns) > 1:
+            df = df.rename(columns={df.columns[1]: "price"})
+        else:
+            df["price"] = 0.0
+
+    df = df[["product", "price"]].copy()
+    df["product"] = df["product"].astype(str).str.strip()
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+    df = df[df["product"].str.len() > 0].drop_duplicates(subset=["product"]).sort_values("product").reset_index(drop=True)
+    return df
+
+
+def clean_students_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a students dataframe to columns: student, school, class."""
+    df = dedupe_columns(df.copy())
+    cols = [str(c).strip().lower() for c in df.columns]
+    df.columns = cols
+    rename_map = {
+        "ονοματεπώνυμο": "student",
+        "ονοματεπωνυμο": "student",
+        "μαθητής": "student",
+        "μαθητης": "student",
+        "student": "student",
+        "σχολείο": "school",
+        "σχολειο": "school",
+        "school": "school",
+        "τάξη": "class",
+        "ταξη": "class",
+        "τμήμα": "class",
+        "τμημα": "class",
+        "class": "class",
+    }
+    df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
+    if "student" not in df.columns:
+        df = df.rename(columns={df.columns[0]: "student"})
+    if "school" not in df.columns:
+        df["school"] = ""
+    if "class" not in df.columns:
+        df["class"] = ""
+
+    df = df[["student", "school", "class"]].copy()
+    df["student"] = df["student"].astype(str).str.strip()
+    df["school"] = df["school"].astype(str).str.strip()
+    df["class"] = df["class"].astype(str).str.strip()
+    df = df[df["student"].str.len() > 0].drop_duplicates(subset=["student", "school", "class"])
+    df = df.sort_values(["school", "class", "student"]).reset_index(drop=True)
+    return df
+
+\n
 
 @st.cache_data
 def load_products() -> pd.DataFrame:
     df = pd.read_csv(PRODUCTS_PATH) if PRODUCTS_PATH.exists() else pd.DataFrame(columns=["product", "price"])
+    df = dedupe_columns(df)
     if "product" not in df.columns:
         df["product"] = ""
     if "price" not in df.columns:
@@ -118,11 +197,12 @@ def load_products() -> pd.DataFrame:
     df["product"] = df["product"].astype(str).str.strip()
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
     df = df[df["product"].str.len() > 0].drop_duplicates(subset=["product"]).sort_values("product").reset_index(drop=True)
+    df = clean_products_df(df)
     return df
 
 
 def save_products(df: pd.DataFrame) -> None:
-    out = df.copy()
+    out = clean_products_df(df)
     if "product" not in out.columns:
         out["product"] = ""
     if "price" not in out.columns:
@@ -138,17 +218,19 @@ def save_products(df: pd.DataFrame) -> None:
 @st.cache_data
 def load_students() -> pd.DataFrame:
     df = pd.read_csv(STUDENTS_PATH) if STUDENTS_PATH.exists() else pd.DataFrame(columns=["student", "school", "class"])
+    df = dedupe_columns(df)
     for c in ["student", "school", "class"]:
         if c not in df.columns:
             df[c] = ""
         df[c] = df[c].astype(str).str.strip()
     df = df[df["student"].str.len() > 0].drop_duplicates(subset=["student", "school", "class"])
     df = df.sort_values(["school", "class", "student"]).reset_index(drop=True)
+    df = clean_students_df(df)
     return df
 
 
 def save_students(df: pd.DataFrame) -> None:
-    out = df.copy()
+    out = clean_students_df(df)
     for c in ["student", "school", "class"]:
         if c not in out.columns:
             out[c] = ""
@@ -165,6 +247,7 @@ def load_orders() -> pd.DataFrame:
         "order_id", "date", "student", "school", "class",
         "product", "qty", "unit_price", "total"
     ])
+    df = dedupe_columns(df)
     # normalize
     for c in ["order_id", "date", "student", "school", "class", "product", "qty", "unit_price", "total"]:
         if c not in df.columns:
@@ -783,6 +866,22 @@ def render_catalog() -> None:
     st.subheader("Κατάλογος προϊόντων")
     products = load_products().copy()
 
+    st.markdown("### Ανέβασμα CSV (αυτόματη διόρθωση)")
+    up = st.file_uploader("Ανέβασε products.csv", type=["csv"], key="up_products_csv")
+    if up is not None:
+        try:
+            df_up = pd.read_csv(up)
+        except Exception:
+            df_up = pd.read_csv(up, encoding="latin1")
+        df_clean = clean_products_df(df_up)
+        st.info("✅ Το αρχείο διορθώθηκε αυτόματα και είναι έτοιμο για αποθήκευση.")
+        st.dataframe(df_clean.rename(columns={"product":"Προϊόν","price":"Τιμή (€)"}), use_container_width=True)
+        if st.button("💾 Αποθήκευση καταλόγου από CSV"):
+            save_products(df_clean)
+            st.success("Αποθηκεύτηκε ο κατάλογος.")
+            st.rerun()
+    st.divider()
+
     with st.form("add_product"):
         c1, c2 = st.columns([3, 1])
         with c1:
@@ -811,7 +910,8 @@ def render_catalog() -> None:
     else:
         st.info("Δεν υπάρχουν προϊόντα.")
 
-    st.dataframe(products.rename(columns={"product": "Προϊόν", "price": "Τιμή (€)"}), use_container_width=True)
+    df_show = dedupe_columns(products).rename(columns={"product": "Προϊόν", "price": "Τιμή (€)"})
+    st.dataframe(df_show, use_container_width=True)
 
 
 def render_students() -> None:
@@ -821,6 +921,22 @@ def render_students() -> None:
 
     st.subheader("Μαθητές/τριες")
     students = load_students().copy()
+
+    st.markdown("### Ανέβασμα CSV μαθητών/τριών (αυτόματη διόρθωση)")
+    up = st.file_uploader("Ανέβασε students.csv", type=["csv"], key="up_students_csv")
+    if up is not None:
+        try:
+            df_up = pd.read_csv(up)
+        except Exception:
+            df_up = pd.read_csv(up, encoding="latin1")
+        df_clean = clean_students_df(df_up)
+        st.info("✅ Το αρχείο διορθώθηκε αυτόματα και είναι έτοιμο για αποθήκευση.")
+        st.dataframe(df_clean.rename(columns={"student":"Ονοματεπώνυμο","school":"Σχολείο","class":"Τάξη"}), use_container_width=True)
+        if st.button("💾 Αποθήκευση μαθητών από CSV"):
+            save_students(df_clean)
+            st.success("Αποθηκεύτηκαν οι μαθητές/τριες.")
+            st.rerun()
+    st.divider()
 
     with st.form("add_student"):
         c1, c2, c3 = st.columns([2, 2, 1])

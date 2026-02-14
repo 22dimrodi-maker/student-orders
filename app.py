@@ -184,7 +184,6 @@ def clean_students_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["school", "class", "student"]).reset_index(drop=True)
     return df
 
-\n
 
 @st.cache_data
 def load_products() -> pd.DataFrame:

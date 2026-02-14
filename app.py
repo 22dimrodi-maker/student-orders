@@ -191,16 +191,26 @@ def pdf_header(c: canvas.Canvas, title: str, logo_bytes: bytes | None):
     left, right = 2 * cm, w - 2 * cm
     top = h - 2 * cm
 
-    # logo
+    # logo (πάνω-αριστερά, χωρίς επικάλυψη με τα κείμενα)
     title_x = left
     if logo_bytes:
         try:
             img = ImageReader(io.BytesIO(logo_bytes))
-            c.drawImage(img, left, top - 1.2 * cm, width=1.2 * cm, height=1.2 * cm, preserveAspectRatio=True, mask="auto")
-            title_x = left + 1.5 * cm
+            logo_w = 1.35 * cm
+            logo_h = 1.35 * cm
+            logo_y = (h - 1.55 * cm)  # ψηλά
+            c.drawImage(
+                img,
+                left,
+                logo_y,
+                width=logo_w,
+                height=logo_h,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            title_x = left + 1.75 * cm
         except Exception:
             title_x = left
-
     c.setFont(FONT_BLD, 14)
     c.drawString(title_x, top, title)
     c.setFont(FONT_REG, 9)
@@ -219,15 +229,6 @@ def pdf_footer(c: canvas.Canvas, app_url: str):
     c.setFont(FONT_REG, 8)
     c.drawString(left, y, f"Σελίδα {c.getPageNumber()}")
     c.drawRightString(right, y, f"Εκτύπωση: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-
-    if app_url and isinstance(app_url, str) and app_url.strip():
-        try:
-            q = qr.QrCode(app_url.strip(), barLevel="M")
-            q.drawOn(c, right - 2.2 * cm, y - 1.8 * cm)
-        except Exception:
-            pass
-
-
 def pdf_new_page(c: canvas.Canvas, title: str, logo_bytes: bytes | None, app_url: str):
     pdf_footer(c, app_url)
     c.showPage()
@@ -584,6 +585,18 @@ if is_admin:
     up_logo = st.sidebar.file_uploader("Λογότυπο (PNG/JPG)", type=["png", "jpg", "jpeg"])
     if up_logo is not None:
         st.session_state["logo_bytes"] = up_logo.read()
+
+    cbtn1, cbtn2 = st.sidebar.columns(2)
+    with cbtn1:
+        if st.button("🧹 Καθαρισμός λογοτύπου", key="clear_logo"):
+            st.session_state["logo_bytes"] = None
+            st.success("Έγινε καθαρισμός λογοτύπου (δεν θα εμφανίζεται στα PDF/UI).")
+            st.rerun()
+    with cbtn2:
+        if st.button("↩️ Επαναφορά repo logo", key="reset_logo"):
+            st.session_state["logo_bytes"] = get_default_logo_bytes()
+            st.success("Έγινε επαναφορά (αν υπάρχει logo.png στο repo).")
+            st.rerun()
 
 app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", value=APP_URL or "", disabled=not is_admin)
 if st.session_state.get("logo_bytes"):

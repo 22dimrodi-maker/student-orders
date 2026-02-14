@@ -4,8 +4,9 @@
 import os
 import io
 import uuid
-import json
 import textwrap
+import zipfile
+import json
 from pathlib import Path
 from datetime import date, datetime
 
@@ -47,8 +48,11 @@ DATA_DIR = Path(".")
 PRODUCTS_PATH = DATA_DIR / "products.csv"
 STUDENTS_PATH = DATA_DIR / "students.csv"
 ORDERS_PATH = DATA_DIR / "orders.csv"
-BACKUP_DIR = DATA_DIR / "backups"
-BACKUP_META_PATH = DATA_DIR / "backup_info.json"
+
+BACKUPS_DIR = DATA_DIR / "backups"
+BACKUPS_DIR.mkdir(exist_ok=True)
+LAST_BACKUP_PATH = BACKUPS_DIR / "last_backup.txt"
+
 
 # (optional) logo file inside repo root: logo.png
 REPO_LOGO_PATH = DATA_DIR / "logo.png"
@@ -167,8 +171,15 @@ def save_orders(df: pd.DataFrame) -> None:
         if c not in out.columns:
             out[c] = pd.NA
     out = out[cols].copy()
-    snapshot_orders_on_save(out)
     out.to_csv(ORDERS_PATH, index=False, encoding="utf-8-sig")
+
+    # snapshot backup (best effort)
+    try:
+        BACKUPS_DIR.mkdir(exist_ok=True)
+        snap = BACKUPS_DIR / f"orders_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+        out.to_csv(snap, index=False, encoding='utf-8-sig')
+    except Exception:
+        pass
     _safe_clear_cache(load_orders)
 
 
@@ -187,84 +198,66 @@ def currency(x) -> str:
         return "0.00 €"
 
 
-# =========================
-# Backup / Restore helpers
-# =========================
-import zipfile
-
-def read_backup_meta() -> dict:
+def _read_last_backup_ts() -> str:
     try:
-        if BACKUP_META_PATH.exists():
-            return json.loads(BACKUP_META_PATH.read_text(encoding="utf-8"))
+        if LAST_BACKUP_PATH.exists():
+            return LAST_BACKUP_PATH.read_text(encoding="utf-8").strip()
     except Exception:
         pass
-    return {"last_backup": ""}
+    return ""
 
-def write_backup_meta(ts: str) -> None:
+
+def _write_last_backup_ts(ts: str) -> None:
     try:
-        BACKUP_META_PATH.write_text(json.dumps({"last_backup": ts}, ensure_ascii=False, indent=2), encoding="utf-8")
+        BACKUPS_DIR.mkdir(exist_ok=True)
+        LAST_BACKUP_PATH.write_text(ts, encoding="utf-8")
     except Exception:
         pass
 
-def make_backup_zip() -> bytes:
-    """
-    Δημιουργεί ZIP backup (orders/students/products + metadata) και επιστρέφει bytes.
-    """
+
+def make_backup_zip() -> tuple[bytes, str]:
+    """Create ZIP with orders/students/products + backup_info.json. Returns (bytes, timestamp_str)."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        for p in [ORDERS_PATH, STUDENTS_PATH, PRODUCTS_PATH]:
-            if p.exists():
-                z.writestr(p.name, p.read_bytes())
-        meta = {"created_at": ts, "files": ["orders.csv", "students.csv", "products.csv"]}
-        z.writestr("backup_info.json", json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
-    bio.seek(0)
-    write_backup_meta(ts)
-    return bio.getvalue()
+    info = {"created_at": ts, "files": ["orders.csv", "students.csv", "products.csv"]}
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("orders.csv", ORDERS_PATH.read_bytes() if ORDERS_PATH.exists() else b"")
+        zf.writestr("students.csv", STUDENTS_PATH.read_bytes() if STUDENTS_PATH.exists() else b"")
+        zf.writestr("products.csv", PRODUCTS_PATH.read_bytes() if PRODUCTS_PATH.exists() else b"")
+        zf.writestr("backup_info.json", json.dumps(info, ensure_ascii=False, indent=2).encode("utf-8"))
+    mem.seek(0)
+    _write_last_backup_ts(ts)
+    return mem.getvalue(), ts
 
-def restore_from_backup_zip(zip_bytes: bytes) -> tuple[bool, str]:
-    """
-    Επαναφορά από ZIP. Επιστρέφει (ok, μήνυμα).
-    """
-    try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-            names = set(z.namelist())
-            required = {"orders.csv", "students.csv", "products.csv"}
-            missing = required - names
-            if missing:
-                return False, f"Λείπουν αρχεία από το backup: {', '.join(sorted(missing))}"
-            ORDERS_PATH.write_bytes(z.read("orders.csv"))
-            STUDENTS_PATH.write_bytes(z.read("students.csv"))
-            PRODUCTS_PATH.write_bytes(z.read("products.csv"))
 
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def restore_backup_zip(zip_bytes: bytes) -> str:
+    """Restore CSVs from backup zip. Returns status message, raises on invalid zip."""
+    mem = io.BytesIO(zip_bytes)
+    with zipfile.ZipFile(mem, mode="r") as zf:
+        names = set(zf.namelist())
+        needed = {"orders.csv", "students.csv", "products.csv"}
+        if not needed.issubset(names):
+            raise ValueError("Μη έγκυρο backup: λείπουν αρχεία (orders/students/products).")
+
+        ORDERS_PATH.write_bytes(zf.read("orders.csv"))
+        STUDENTS_PATH.write_bytes(zf.read("students.csv"))
+        PRODUCTS_PATH.write_bytes(zf.read("products.csv"))
+
+        ts = ""
+        if "backup_info.json" in names:
             try:
-                if "backup_info.json" in names:
-                    info = json.loads(z.read("backup_info.json").decode("utf-8", errors="ignore"))
-                    ts = info.get("created_at") or ts
+                info = json.loads(zf.read("backup_info.json").decode("utf-8"))
+                ts = str(info.get("created_at", "")).strip()
             except Exception:
-                pass
-            write_backup_meta(ts)
+                ts = ""
+        if not ts:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _write_last_backup_ts(ts)
 
-        _safe_clear_cache(load_orders)
-        _safe_clear_cache(load_students)
-        _safe_clear_cache(load_products)
-        return True, "✅ Η επαναφορά ολοκληρώθηκε."
-    except Exception as e:
-        return False, f"Σφάλμα επαναφοράς: {e}"
-
-def snapshot_orders_on_save(df: pd.DataFrame) -> None:
-    """
-    Κρατάει στιγμιότυπο orders σε /backups κατά την αποθήκευση.
-    """
-    try:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        snap = BACKUP_DIR / f"orders_{ts}.csv"
-        df.to_csv(snap, index=False, encoding="utf-8-sig")
-    except Exception:
-        pass
-
+    _safe_clear_cache(load_orders)
+    _safe_clear_cache(load_students)
+    _safe_clear_cache(load_products)
+    return "✅ Η επαναφορά ολοκληρώθηκε."
 
 # =========================
 # PDF utilities (common theme)
@@ -567,21 +560,15 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
         for student, g_student in g_school.groupby("student", dropna=False):
             if y < 3.0 * cm:
                 y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
-
-            cls = str(g_student["class"].iloc[0] or "").strip()
             student_wrapped = wrap2(student, width=38)
 
             c.setFont(FONT_BLD, 11)
             c.drawString(left, y, "Μαθητής/-τρια:")
             c.setFont(FONT_REG, 11)
-            c.drawString(left + 3.2 * cm, y, student_wrapped.split("\n")[0])
+            c.drawString(left + 3.8 * cm, y, student_wrapped.split("\n")[0])
             y -= 0.45 * cm
             if "\n" in student_wrapped:
-                c.drawString(left + 3.2 * cm, y, student_wrapped.split("\n")[1])
-                y -= 0.45 * cm
-            if cls:
-                c.setFont(FONT_REG, 10)
-                c.drawString(left + 3.2 * cm, y, f"Τάξη: {cls}")
+                c.drawString(left + 3.8 * cm, y, student_wrapped.split("\n")[1])
                 y -= 0.45 * cm
 
             y = head(y)
@@ -615,7 +602,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
                 y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
             c.setFont(FONT_BLD, 10)
-            c.drawRightString(x_total_r, y, f"Σύνολο μαθητή/-τριας: {subtotal:.2f} €")
+            c.drawRightString(x_total_r, y, f"Τελικό σύνολο: {subtotal:.2f} €")
             y -= 0.40 * cm
 
             # separator
@@ -666,6 +653,11 @@ if "logo_bytes" not in st.session_state:
 if "qr_enabled" not in st.session_state:
     st.session_state["qr_enabled"] = False
 
+if "backup_zip_bytes" not in st.session_state:
+    st.session_state["backup_zip_bytes"] = None
+if "backup_ts" not in st.session_state:
+    st.session_state["backup_ts"] = _read_last_backup_ts()
+
 if "my_order_ids" not in st.session_state:
     st.session_state["my_order_ids"] = []  # session-only ids for non-admin delete
 
@@ -699,47 +691,37 @@ if is_admin:
             st.success("Έγινε επαναφορά (αν υπάρχει logo.png στο repo).")
             st.rerun()
 
+    st.sidebar.markdown("### Backup δεδομένων")
+    st.session_state["backup_ts"] = _read_last_backup_ts()
+
+    if st.sidebar.button("⚡ Γρήγορο backup τώρα", key="quick_backup_btn"):
+        b, ts = make_backup_zip()
+        st.session_state["backup_zip_bytes"] = b
+        st.session_state["backup_ts"] = ts
+
+    if st.session_state.get("backup_zip_bytes"):
+        st.sidebar.download_button(
+            "⬇️ Λήψη backup ZIP",
+            data=st.session_state["backup_zip_bytes"],
+            file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+            mime="application/zip",
+            key="dl_backup_sidebar",
+        )
+
+    if st.session_state.get("backup_ts"):
+        try:
+            last_dt = datetime.strptime(st.session_state["backup_ts"], "%Y-%m-%d %H:%M:%S")
+            days = (datetime.now() - last_dt).days
+            if days >= 3:
+                st.sidebar.warning(f"⚠️ Συνιστάται νέο backup (τελευταίο: {st.session_state['backup_ts']})")
+            else:
+                st.sidebar.caption(f"Τελευταίο backup: {st.session_state['backup_ts']}")
+        except Exception:
+            st.sidebar.caption(f"Τελευταίο backup: {st.session_state['backup_ts']}")
+
 app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", value=APP_URL or "", disabled=not is_admin)
 if is_admin:
     st.session_state["qr_enabled"] = st.sidebar.toggle("QR στο PDF (ON/OFF)", value=st.session_state.get("qr_enabled", False))
-
-    with st.sidebar.expander("💾 Backup / Επαναφορά", expanded=False):
-        meta = read_backup_meta()
-        last = meta.get("last_backup") or "—"
-        st.write(f"**Τελευταίο backup:** {last}")
-
-        try:
-            if last != "—":
-                dt_last = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-                days = (datetime.now() - dt_last).days
-                if days >= 7:
-                    st.warning("⚠️ Έχουν περάσει αρκετές ημέρες από το τελευταίο backup.")
-        except Exception:
-            pass
-
-        if st.button("⬇️ Δημιουργία backup", key="mk_backup_zip"):
-            zbytes = make_backup_zip()
-            st.download_button(
-                "✅ Κατέβασμα backup.zip",
-                data=zbytes,
-                file_name="backup.zip",
-                mime="application/zip",
-                key="dl_backup_zip_btn",
-            )
-
-        st.divider()
-        upzip = st.file_uploader("⬆️ Επαναφορά από Backup (ZIP)", type=["zip"], key="up_backup_zip")
-        confirm = st.checkbox("✅ Επιβεβαιώνω ότι θα γίνει αντικατάσταση δεδομένων", key="conf_restore")
-        if st.button("↩️ Εκτέλεση επαναφοράς", key="do_restore") and upzip is not None:
-            if not confirm:
-                st.error("Χρειάζεται επιβεβαίωση.")
-            else:
-                ok, msg = restore_from_backup_zip(upzip.read())
-                if ok:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
 if st.session_state.get("logo_bytes"):
     st.sidebar.image(st.session_state["logo_bytes"], use_column_width=True)
 
@@ -791,7 +773,7 @@ with c_title:
 # =========================
 # Navigation
 # =========================
-pages_admin = ["Παραγγελίες", "Σύνοψη", "Δελτία", "Κατάλογος", "Μαθητές"]
+pages_admin = ["Παραγγελίες", "Σύνοψη", "Δελτία", "Backup / Επαναφορά", "Κατάλογος", "Μαθητές"]
 pages_user = ["Παραγγελίες", "Σύνοψη", "Δελτία"]
 page = st.sidebar.radio("Μενού", pages_admin if is_admin else pages_user, index=0)
 
@@ -1041,44 +1023,54 @@ def render_orders(is_admin: bool):
             )
             st.session_state["last_student_label"] = label
 
-        # ---- FORM to avoid losing last row edits ----
-        with st.form("order_form", clear_on_submit=False):
-            edited = st.data_editor(
-                st.session_state["order_editor_df"],
-                key="order_editor",
-                num_rows="dynamic",
-                column_config={
-                    "Προϊόν": st.column_config.SelectboxColumn("Προϊόν", options=catalog, required=False),
-                    "Ποσότητα": st.column_config.NumberColumn("Ποσότητα", min_value=1, step=1),
-                    "Μερικό (€)": st.column_config.NumberColumn("Μερικό (€)", format="%.2f", disabled=True),
-                },
-                use_container_width=True,
-            )
+                # ---- Live editor (με άμεσο υπολογισμό τιμής/μερικού) ----
+                def _compute_order_view(df_in: pd.DataFrame) -> pd.DataFrame:
+                    df = df_in.copy()
+                    if "Προϊόν" not in df.columns:
+                        df["Προϊόν"] = ""
+                    if "Ποσότητα" not in df.columns:
+                        df["Ποσότητα"] = 1
+                    df["Ποσότητα"] = pd.to_numeric(df["Ποσότητα"], errors="coerce").fillna(1).astype(int).clip(lower=1)
+                    df["Προϊόν"] = df["Προϊόν"].astype(str)
 
-            edited = edited.copy()
-            edited["Ποσότητα"] = pd.to_numeric(edited.get("Ποσότητα", 1), errors="coerce").fillna(1).astype(int)
-            edited["Ποσότητα"] = edited["Ποσότητα"].clip(lower=1)
-            edited["Προϊόν"] = edited.get("Προϊόν", "").astype(str)
+                    def _price(p):
+                        return float(price_map.get(str(p).strip(), 0.0))
 
-            def _line_total(r):
-                p = str(r.get("Προϊόν", "")).strip()
-                q = int(r.get("Ποσότητα", 1))
-                return float(price_map.get(p, 0.0)) * q
+                    df["Τιμή (€)"] = df["Προϊόν"].apply(_price)
+                    df["Μερικό (€)"] = df["Τιμή (€)"] * df["Ποσότητα"]
+                    return df
 
-            edited["Μερικό (€)"] = edited.apply(_line_total, axis=1)
-            st.session_state["order_editor_df"] = edited
-            subtotal = float(edited["Μερικό (€)"].sum()) if "Μερικό (€)" in edited.columns else 0.0
-            st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
+                # προβολή με υπολογιζόμενες στήλες (disabled)
+                view_df = _compute_order_view(st.session_state["order_editor_df"])
 
-            b1, b2, b3 = st.columns([1, 1, 2])
-            with b1:
-                save_click = st.form_submit_button("✅ Καταχώριση παραγγελίας")
-            with b2:
-                new_click = st.form_submit_button("🧹 Νέα παραγγελία")
-            with b3:
-                add_row = st.form_submit_button("➕ Προσθήκη γραμμής")
+                edited = st.data_editor(
+                    view_df,
+                    key="order_editor",
+                    num_rows="dynamic",
+                    column_config={
+                        "Προϊόν": st.column_config.SelectboxColumn("Προϊόν", options=catalog, required=False),
+                        "Ποσότητα": st.column_config.NumberColumn("Ποσότητα", min_value=1, step=1),
+                        "Τιμή (€)": st.column_config.NumberColumn("Τιμή (€)", format="%.2f", disabled=True),
+                        "Μερικό (€)": st.column_config.NumberColumn("Μερικό (€)", format="%.2f", disabled=True),
+                    },
+                    use_container_width=True,
+                )
 
-        # actions outside form
+                # κρατάμε μόνο τα editable πεδία και ξαναϋπολογίζουμε
+                edited_base = edited[["Προϊόν", "Ποσότητα"]].copy() if not edited.empty else pd.DataFrame(columns=["Προϊόν", "Ποσότητα"])
+                st.session_state["order_editor_df"] = edited_base
+
+                # σύνολο τρέχουσας παραγγελίας
+                subtotal = float(_compute_order_view(edited_base)["Μερικό (€)"].sum()) if len(edited_base) else 0.0
+                st.markdown(f"**Σύνολο τρέχουσας παραγγελίας:** {subtotal:.2f} €")
+
+                b1, b2, b3 = st.columns([1, 1, 2])
+                with b1:
+                    save_click = st.button("✅ Καταχώριση παραγγελίας", key="btn_save_order")
+                with b2:
+                    new_click = st.button("🧹 Νέα παραγγελία", key="btn_new_order")
+                with b3:
+                    add_row = st.button("➕ Προσθήκη γραμμής", key="btn_add_row")# actions outside form
         sel_row = students_local.loc[students_local["label"] == label].iloc[0]
         s_name, s_school, s_class = sel_row["student"], sel_row["school"], sel_row["class"]
 
@@ -1480,6 +1472,52 @@ def render_bulletins(is_admin: bool):
             st.download_button("⬇️ Λήψη PDF", data=pdfbuf.getvalue(), file_name="δελτιο.pdf", mime="application/pdf")
 
 
+
+def render_backup(is_admin: bool):
+    if not is_admin:
+        st.error("Μόνο διαχειριστής/ρια.")
+        st.stop()
+
+    st.subheader("Backup / Επαναφορά")
+    st.write("Δημιούργησε αντίγραφο ασφαλείας (ZIP) ή επανάφερε δεδομένα από backup.")
+
+    st.markdown("### Δημιουργία backup")
+    b1, b2 = st.columns([1, 2])
+    with b1:
+        if st.button("✅ Δημιουργία backup ZIP", key="make_backup_page"):
+            b, ts = make_backup_zip()
+            st.session_state["backup_zip_bytes"] = b
+            st.session_state["backup_ts"] = ts
+    with b2:
+        if st.session_state.get("backup_ts"):
+            st.info(f"Τελευταίο backup: {st.session_state['backup_ts']}")
+
+    if st.session_state.get("backup_zip_bytes"):
+        st.download_button(
+            "⬇️ Λήψη backup ZIP",
+            data=st.session_state["backup_zip_bytes"],
+            file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+            mime="application/zip",
+            key="dl_backup_page",
+        )
+
+    st.divider()
+    st.markdown("### Επαναφορά από backup ZIP")
+    up = st.file_uploader("Ανέβασε backup ZIP", type=["zip"], key="up_restore_zip")
+    confirm = st.checkbox("✅ Επιβεβαιώνω ότι η επαναφορά θα αντικαταστήσει τα τρέχοντα δεδομένα", key="conf_restore_zip")
+
+    if up is not None and confirm:
+        if st.button("↩️ Εκτέλεση επαναφοράς", key="do_restore_zip"):
+            try:
+                msg = restore_backup_zip(up.read())
+                st.success(msg)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Σφάλμα επαναφοράς: {e}")
+
+    st.caption("Σημείωση: Κάνε backup πριν από αλλαγές/αναβαθμίσεις ή πριν από deploy.")
+
+
 # =========================
 # Dispatch
 # =========================
@@ -1487,6 +1525,7 @@ PAGE_RENDERERS = {
     "Παραγγελίες": render_orders,
     "Σύνοψη": render_summary,
     "Δελτία": render_bulletins,
+    "Backup / Επαναφορά": render_backup,
     "Κατάλογος": render_catalog,
     "Μαθητές": render_students,
 }

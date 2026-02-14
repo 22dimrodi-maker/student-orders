@@ -186,7 +186,7 @@ def currency(x) -> str:
 # =========================
 # PDF utilities (common theme)
 # =========================
-def pdf_header(c: canvas.Canvas, title: str, logo_bytes: bytes | None):
+def pdf_header(c: canvas.Canvas, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     w, h = A4
     left, right = 2 * cm, w - 2 * cm
     top = h - 2 * cm
@@ -214,7 +214,22 @@ def pdf_header(c: canvas.Canvas, title: str, logo_bytes: bytes | None):
     c.setFont(FONT_BLD, 14)
     c.drawString(title_x, top, title)
     c.setFont(FONT_REG, 9)
-    c.drawRightString(right, top, f"Ημερομηνία εξαγωγής: {date.today().isoformat()}")
+    # QR (πάνω δεξιά) — προαιρετικό
+    qr_box = 1.35 * cm
+    qr_drawn = False
+    if qr_enabled and app_url and isinstance(app_url, str) and app_url.strip():
+        try:
+            q = qr.QrCode(app_url.strip(), barLevel="M")
+            q.drawOn(c, right - qr_box, (h - 1.55 * cm))
+            qr_drawn = True
+        except Exception:
+            qr_drawn = False
+
+    # Ημερομηνία εξαγωγής (να μην πέφτει κάτω από το QR)
+    if qr_drawn:
+        c.drawRightString(right - (qr_box + 0.2 * cm), top, f"Ημερομηνία εξαγωγής: {date.today().isoformat()}")
+    else:
+        c.drawRightString(right, top, f"Ημερομηνία εξαγωγής: {date.today().isoformat()}")
 
     c.setLineWidth(0.5)
     c.line(left, top - 0.2 * cm, right, top - 0.2 * cm)
@@ -229,19 +244,19 @@ def pdf_footer(c: canvas.Canvas, app_url: str):
     c.setFont(FONT_REG, 8)
     c.drawString(left, y, f"Σελίδα {c.getPageNumber()}")
     c.drawRightString(right, y, f"Εκτύπωση: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-def pdf_new_page(c: canvas.Canvas, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_new_page(c: canvas.Canvas, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     pdf_footer(c, app_url)
     c.showPage()
-    return pdf_header(c, title, logo_bytes)
+    return pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
 
-def pdf_by_student_summary(by_student: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_by_student_summary(by_student: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     w, _ = A4
     left, right = 2 * cm, w - 2 * cm
 
-    y = pdf_header(c, title, logo_bytes)
+    y = pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
     # fixed columns
     x_student = left
@@ -264,7 +279,7 @@ def pdf_by_student_summary(by_student: pd.DataFrame, title: str, logo_bytes: byt
 
     for _, r in by_student.iterrows():
         if y < 2.4 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
             y = head(y)
 
         student = wrap2(r.get("Μαθητής/-τρια", ""), width=26)
@@ -284,7 +299,7 @@ def pdf_by_student_summary(by_student: pd.DataFrame, title: str, logo_bytes: byt
 
         if s2.strip():
             if y < 2.4 * cm:
-                y = pdf_new_page(c, title, logo_bytes, app_url)
+                y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
                 y = head(y)
             c.drawString(x_student, y, s2[:32])
             y -= 0.40 * cm
@@ -296,12 +311,12 @@ def pdf_by_student_summary(by_student: pd.DataFrame, title: str, logo_bytes: byt
     return buf
 
 
-def pdf_by_class_summary(by_class: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_by_class_summary(by_class: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     w, _ = A4
     left, right = 2 * cm, w - 2 * cm
-    y = pdf_header(c, title, logo_bytes)
+    y = pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
     x_school = left
     x_class = left + 9.0 * cm
@@ -321,7 +336,7 @@ def pdf_by_class_summary(by_class: pd.DataFrame, title: str, logo_bytes: bytes |
 
     for _, r in by_class.iterrows():
         if y < 2.4 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
             y = head(y)
         school = str(r.get("Σχολείο", "") or "")
         clazz = str(r.get("Τάξη", "") or "")
@@ -341,12 +356,12 @@ def pdf_by_class_summary(by_class: pd.DataFrame, title: str, logo_bytes: bytes |
     return buf
 
 
-def pdf_by_school_summary(by_school: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_by_school_summary(by_school: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     w, _ = A4
     left, right = 2 * cm, w - 2 * cm
-    y = pdf_header(c, title, logo_bytes)
+    y = pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
     x_school = left
     x_qty_r = right - 4.0 * cm
@@ -364,7 +379,7 @@ def pdf_by_school_summary(by_school: pd.DataFrame, title: str, logo_bytes: bytes
 
     for _, r in by_school.iterrows():
         if y < 2.4 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
             y = head(y)
 
         school = str(r.get("Σχολείο", "") or "")
@@ -383,13 +398,13 @@ def pdf_by_school_summary(by_school: pd.DataFrame, title: str, logo_bytes: bytes
     return buf
 
 
-def pdf_by_product_summary(by_product_df: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_by_product_summary(by_product_df: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     # expects columns product, qty, total
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     w, _ = A4
     left, right = 2 * cm, w - 2 * cm
-    y = pdf_header(c, title, logo_bytes)
+    y = pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
     x_product = left
     x_qty_r = right - 3.0 * cm
@@ -407,7 +422,7 @@ def pdf_by_product_summary(by_product_df: pd.DataFrame, title: str, logo_bytes: 
 
     for _, r in by_product_df.iterrows():
         if y < 2.4 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
             y = head(y)
 
         prod = str(r.get("product", "") or "")
@@ -426,7 +441,7 @@ def pdf_by_product_summary(by_product_df: pd.DataFrame, title: str, logo_bytes: 
     return buf
 
 
-def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str):
+def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | None, app_url: str, qr_enabled: bool):
     """
     PDF «Δελτίο Παραγγελιών» με fixed columns, ομαδοποίηση Σχολείο → Μαθητής/-τρια,
     διαχωρισμό μαθητών με γραμμή και κενό, και wrap 2 γραμμών στο προϊόν αν χρειαστεί.
@@ -437,7 +452,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
     w, _ = A4
     left, right = 2 * cm, w - 2 * cm
 
-    y = pdf_header(c, title, logo_bytes)
+    y = pdf_header(c, title, logo_bytes, app_url, qr_enabled)
 
     # fixed columns
     x_prod = left
@@ -458,7 +473,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
 
     for school, g_school in detail.groupby("school", dropna=False):
         if y < 3.0 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
         c.setFont(FONT_BLD, 12)
         c.drawString(left, y, f"Σχολείο: {school or '—'}")
@@ -468,7 +483,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
 
         for student, g_student in g_school.groupby("student", dropna=False):
             if y < 3.0 * cm:
-                y = pdf_new_page(c, title, logo_bytes, app_url)
+                y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
             cls = str(g_student["class"].iloc[0] or "").strip()
             student_wrapped = wrap2(student, width=38)
@@ -493,7 +508,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
 
             for _, r in g_student.sort_values(["product"]).iterrows():
                 if y < 2.4 * cm:
-                    y = pdf_new_page(c, title, logo_bytes, app_url)
+                    y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
                     y = head(y)
 
                 prod = str(r["product"])
@@ -506,7 +521,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
 
                 if len(prod_lines) > 1:
                     if y < 2.4 * cm:
-                        y = pdf_new_page(c, title, logo_bytes, app_url)
+                        y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
                         y = head(y)
                     c.drawString(x_prod, y, prod_lines[1])
                     y -= 0.38 * cm
@@ -514,7 +529,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
                 subtotal += float(r["total"])
 
             if y < 2.6 * cm:
-                y = pdf_new_page(c, title, logo_bytes, app_url)
+                y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
             c.setFont(FONT_BLD, 10)
             c.drawRightString(x_total_r, y, f"Σύνολο μαθητή/-τριας: {subtotal:.2f} €")
@@ -528,7 +543,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
             school_total += subtotal
 
         if y < 2.6 * cm:
-            y = pdf_new_page(c, title, logo_bytes, app_url)
+            y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
         c.setFont(FONT_BLD, 11)
         c.drawRightString(right - 0.5 * cm, y, f"Σύνολο Σχολείου: {school_total:.2f} €")
@@ -537,7 +552,7 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
         grand_total += school_total
 
     if y < 2.6 * cm:
-        y = pdf_new_page(c, title, logo_bytes, app_url)
+        y = pdf_new_page(c, title, logo_bytes, app_url, qr_enabled)
 
     c.setFont(FONT_BLD, 12)
     c.drawRightString(right - 0.5 * cm, y, f"Γενικό Σύνολο: {grand_total:.2f} €")
@@ -564,6 +579,9 @@ def get_default_logo_bytes():
 
 if "logo_bytes" not in st.session_state:
     st.session_state["logo_bytes"] = get_default_logo_bytes()
+
+if "qr_enabled" not in st.session_state:
+    st.session_state["qr_enabled"] = False
 
 if "my_order_ids" not in st.session_state:
     st.session_state["my_order_ids"] = []  # session-only ids for non-admin delete
@@ -599,6 +617,8 @@ if is_admin:
             st.rerun()
 
 app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", value=APP_URL or "", disabled=not is_admin)
+if is_admin:
+    st.session_state["qr_enabled"] = st.sidebar.toggle("QR στο PDF (ON/OFF)", value=st.session_state.get("qr_enabled", False))
 if st.session_state.get("logo_bytes"):
     st.sidebar.image(st.session_state["logo_bytes"], use_column_width=True)
 
@@ -1246,31 +1266,23 @@ def render_summary(is_admin: bool):
 
     with p1:
         if st.button("📄 PDF: Ανά μαθητή", key="pdf_student"):
-            pdfbuf = pdf_by_student_summary(
-                by_student, "Αναφορά ανά μαθητή/τρια", st.session_state.get("logo_bytes"), app_url
-            )
+            pdfbuf = pdf_by_student_summary(by_student, "Αναφορά ανά μαθητή/τρια", st.session_state.get("logo_bytes"), app_url, st.session_state.get("qr_enabled", False))
             st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="ανα_μαθητη.pdf", mime="application/pdf")
 
     with p2:
         if st.button("📄 PDF: Ανά τάξη", key="pdf_class"):
-            pdfbuf = pdf_by_class_summary(
-                by_class, "Αναφορά ανά τάξη", st.session_state.get("logo_bytes"), app_url
-            )
+            pdfbuf = pdf_by_class_summary(by_class, "Αναφορά ανά τάξη", st.session_state.get("logo_bytes"), app_url, st.session_state.get("qr_enabled", False))
             st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="ανα_ταξη.pdf", mime="application/pdf")
 
     with p3:
         if st.button("📄 PDF: Ανά σχολείο", key="pdf_school"):
-            pdfbuf = pdf_by_school_summary(
-                by_school, "Αναφορά ανά σχολείο", st.session_state.get("logo_bytes"), app_url
-            )
+            pdfbuf = pdf_by_school_summary(by_school, "Αναφορά ανά σχολείο", st.session_state.get("logo_bytes"), app_url, st.session_state.get("qr_enabled", False))
             st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="ανα_σχολειο.pdf", mime="application/pdf")
 
     with p4:
         if st.button("📄 PDF: Ανά προϊόν", key="pdf_product"):
             src = by_product.rename(columns={"Προϊόν": "product", "Ποσότητα": "qty", "Σύνολο (€)": "total"})
-            pdfbuf = pdf_by_product_summary(
-                src, "Παραγγελία προς κατάστημα", st.session_state.get("logo_bytes"), app_url
-            )
+            pdfbuf = pdf_by_product_summary(src, "Παραγγελία προς κατάστημα", st.session_state.get("logo_bytes"), app_url, st.session_state.get("qr_enabled", False))
             st.download_button("⬇️ Λήψη", data=pdfbuf.getvalue(), file_name="προς_κατάστημα.pdf", mime="application/pdf")
 
 
@@ -1343,7 +1355,7 @@ def render_bulletins(is_admin: bool):
         )
     with c2:
         if st.button("📄 Εξαγωγή PDF (ομαδοποίηση ανά σχολείο/μαθητή)"):
-            pdfbuf = pdf_bulletin_grouped(detail, "Δελτίο Παραγγελιών", st.session_state.get("logo_bytes"), app_url)
+            pdfbuf = pdf_bulletin_grouped(detail, "Δελτίο Παραγγελιών", st.session_state.get("logo_bytes"), app_url, st.session_state.get("qr_enabled", False))
             st.download_button("⬇️ Λήψη PDF", data=pdfbuf.getvalue(), file_name="δελτιο.pdf", mime="application/pdf")
 
 

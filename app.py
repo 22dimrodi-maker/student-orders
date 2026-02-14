@@ -4,6 +4,7 @@
 import os
 import io
 import uuid
+import json
 import textwrap
 from pathlib import Path
 from datetime import date, datetime
@@ -46,6 +47,8 @@ DATA_DIR = Path(".")
 PRODUCTS_PATH = DATA_DIR / "products.csv"
 STUDENTS_PATH = DATA_DIR / "students.csv"
 ORDERS_PATH = DATA_DIR / "orders.csv"
+BACKUP_DIR = DATA_DIR / "backups"
+BACKUP_META_PATH = DATA_DIR / "backup_info.json"
 
 # (optional) logo file inside repo root: logo.png
 REPO_LOGO_PATH = DATA_DIR / "logo.png"
@@ -164,6 +167,7 @@ def save_orders(df: pd.DataFrame) -> None:
         if c not in out.columns:
             out[c] = pd.NA
     out = out[cols].copy()
+    snapshot_orders_on_save(out)
     out.to_csv(ORDERS_PATH, index=False, encoding="utf-8-sig")
     _safe_clear_cache(load_orders)
 
@@ -181,6 +185,85 @@ def currency(x) -> str:
         return f"{float(x):.2f} €"
     except Exception:
         return "0.00 €"
+
+
+# =========================
+# Backup / Restore helpers
+# =========================
+import zipfile
+
+def read_backup_meta() -> dict:
+    try:
+        if BACKUP_META_PATH.exists():
+            return json.loads(BACKUP_META_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"last_backup": ""}
+
+def write_backup_meta(ts: str) -> None:
+    try:
+        BACKUP_META_PATH.write_text(json.dumps({"last_backup": ts}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def make_backup_zip() -> bytes:
+    """
+    Δημιουργεί ZIP backup (orders/students/products + metadata) και επιστρέφει bytes.
+    """
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        for p in [ORDERS_PATH, STUDENTS_PATH, PRODUCTS_PATH]:
+            if p.exists():
+                z.writestr(p.name, p.read_bytes())
+        meta = {"created_at": ts, "files": ["orders.csv", "students.csv", "products.csv"]}
+        z.writestr("backup_info.json", json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+    bio.seek(0)
+    write_backup_meta(ts)
+    return bio.getvalue()
+
+def restore_from_backup_zip(zip_bytes: bytes) -> tuple[bool, str]:
+    """
+    Επαναφορά από ZIP. Επιστρέφει (ok, μήνυμα).
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
+            names = set(z.namelist())
+            required = {"orders.csv", "students.csv", "products.csv"}
+            missing = required - names
+            if missing:
+                return False, f"Λείπουν αρχεία από το backup: {', '.join(sorted(missing))}"
+            ORDERS_PATH.write_bytes(z.read("orders.csv"))
+            STUDENTS_PATH.write_bytes(z.read("students.csv"))
+            PRODUCTS_PATH.write_bytes(z.read("products.csv"))
+
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                if "backup_info.json" in names:
+                    info = json.loads(z.read("backup_info.json").decode("utf-8", errors="ignore"))
+                    ts = info.get("created_at") or ts
+            except Exception:
+                pass
+            write_backup_meta(ts)
+
+        _safe_clear_cache(load_orders)
+        _safe_clear_cache(load_students)
+        _safe_clear_cache(load_products)
+        return True, "✅ Η επαναφορά ολοκληρώθηκε."
+    except Exception as e:
+        return False, f"Σφάλμα επαναφοράς: {e}"
+
+def snapshot_orders_on_save(df: pd.DataFrame) -> None:
+    """
+    Κρατάει στιγμιότυπο orders σε /backups κατά την αποθήκευση.
+    """
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        snap = BACKUP_DIR / f"orders_{ts}.csv"
+        df.to_csv(snap, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
 
 
 # =========================
@@ -619,6 +702,44 @@ if is_admin:
 app_url = st.sidebar.text_input("URL εφαρμογής (για QR)", value=APP_URL or "", disabled=not is_admin)
 if is_admin:
     st.session_state["qr_enabled"] = st.sidebar.toggle("QR στο PDF (ON/OFF)", value=st.session_state.get("qr_enabled", False))
+
+    with st.sidebar.expander("💾 Backup / Επαναφορά", expanded=False):
+        meta = read_backup_meta()
+        last = meta.get("last_backup") or "—"
+        st.write(f"**Τελευταίο backup:** {last}")
+
+        try:
+            if last != "—":
+                dt_last = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+                days = (datetime.now() - dt_last).days
+                if days >= 7:
+                    st.warning("⚠️ Έχουν περάσει αρκετές ημέρες από το τελευταίο backup.")
+        except Exception:
+            pass
+
+        if st.button("⬇️ Δημιουργία backup", key="mk_backup_zip"):
+            zbytes = make_backup_zip()
+            st.download_button(
+                "✅ Κατέβασμα backup.zip",
+                data=zbytes,
+                file_name="backup.zip",
+                mime="application/zip",
+                key="dl_backup_zip_btn",
+            )
+
+        st.divider()
+        upzip = st.file_uploader("⬆️ Επαναφορά από Backup (ZIP)", type=["zip"], key="up_backup_zip")
+        confirm = st.checkbox("✅ Επιβεβαιώνω ότι θα γίνει αντικατάσταση δεδομένων", key="conf_restore")
+        if st.button("↩️ Εκτέλεση επαναφοράς", key="do_restore") and upzip is not None:
+            if not confirm:
+                st.error("Χρειάζεται επιβεβαίωση.")
+            else:
+                ok, msg = restore_from_backup_zip(upzip.read())
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
 if st.session_state.get("logo_bytes"):
     st.sidebar.image(st.session_state["logo_bytes"], use_column_width=True)
 

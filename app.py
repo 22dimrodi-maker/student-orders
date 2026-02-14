@@ -564,8 +564,9 @@ def pdf_bulletin_grouped(detail: pd.DataFrame, title: str, logo_bytes: bytes | N
 
             c.setFont(FONT_BLD, 11)
             c.drawString(left, y, "Μαθητής/-τρια:")
+            y -= 0.5 * cm
             c.setFont(FONT_REG, 11)
-            c.drawString(left + 3.8 * cm, y, student_wrapped.split("\n")[0])
+            c.drawString(left, y, student_wrapped.split("\n")[0])
             y -= 0.45 * cm
             if "\n" in student_wrapped:
                 c.drawString(left + 3.8 * cm, y, student_wrapped.split("\n")[1])
@@ -1171,7 +1172,7 @@ def render_orders(is_admin: bool):
         sel_student = st.selectbox("Μαθητής/-τρια", ["(επιλογή...)"] + student_list, key="edit_student_all")
         if sel_student != "(επιλογή...)":
             df_s = df[df["student"] == sel_student].copy().sort_values(["date", "product"])
-            st.markdown(f"**Σύνολο μαθητή/-τριας:** {df_s['total'].sum():.2f} €")
+            st.markdown(f"**Τελικό σύνολο:** {df_s['total'].sum():.2f} €")
 
             df_s_view = df_s.copy()
             df_s_view["Ημερομηνία"] = pd.to_datetime(df_s_view["date"], errors="coerce").dt.date

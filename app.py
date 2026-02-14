@@ -116,11 +116,12 @@ def dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def clean_products_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize a products dataframe to columns: product, price."""
+    """Normalize a products dataframe to columns: product, price (robust to duplicate columns)."""
     df = dedupe_columns(df.copy())
+
     # normalize column names
-    cols = [str(c).strip().lower() for c in df.columns]
-    df.columns = cols
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
     # map common greek headers
     rename_map = {
         "προϊόν": "product",
@@ -133,6 +134,11 @@ def clean_products_df(df: pd.DataFrame) -> pd.DataFrame:
         "price": "price",
     }
     df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
+
+    # IMPORTANT: renames can create duplicate names -> dedupe again
+    df = dedupe_columns(df)
+
+    # ensure product/price exist
     if "product" not in df.columns:
         df = df.rename(columns={df.columns[0]: "product"})
     if "price" not in df.columns:
@@ -141,10 +147,18 @@ def clean_products_df(df: pd.DataFrame) -> pd.DataFrame:
         else:
             df["price"] = 0.0
 
+    # If still duplicated somehow, force first column
+    if isinstance(df.get("product"), pd.DataFrame):
+        df["product"] = df["product"].iloc[:, 0]
+    if isinstance(df.get("price"), pd.DataFrame):
+        df["price"] = df["price"].iloc[:, 0]
+
     df = df[["product", "price"]].copy()
     df["product"] = df["product"].astype(str).str.strip()
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-    df = df[df["product"].str.len() > 0].drop_duplicates(subset=["product"]).sort_values("product").reset_index(drop=True)
+
+    df = df[df["product"].str.len() > 0].drop_duplicates(subset=["product"])
+    df = df.sort_values("product").reset_index(drop=True)
     return df
 
 

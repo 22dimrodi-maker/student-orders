@@ -15,8 +15,8 @@ import qrcode
 # CONFIG
 # =============================
 
-APP_PASSWORD = "12345"
-ADMIN_PIN = "4321"
+APP_PASSWORD = "1966"
+ADMIN_PIN = "1966"
 
 DATA_DIR = Path(".")
 ORDERS_PATH = DATA_DIR / "orders.csv"

@@ -39,8 +39,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 # =========================
 # Simple credentials (Option 2)
 # =========================
-APP_PASSWORD = "12345"   # change this
-ADMIN_PIN = "4321"       # change this (admin features)
+APP_PASSWORD = "1966"   # change this
+ADMIN_PIN = "1966"       # change this (admin features)
 
 APP_TITLE = "Παραγγελίες Μαθητών"
 APP_URL_DEFAULT = ""     # optional, used for QR if you want

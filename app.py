@@ -39,8 +39,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 # =========================
 # Simple credentials (Option 2)
 # =========================
-APP_PASSWORD = "1966"   # change this
-ADMIN_PIN = "1966"       # change this (admin features)
+APP_PASSWORD = "12345"   # change this
+ADMIN_PIN = "4321"       # change this (admin features)
 
 APP_TITLE = "Παραγγελίες Μαθητών"
 APP_URL_DEFAULT = ""     # optional, used for QR if you want
@@ -210,6 +210,17 @@ def wrap_lines(s: str, width: int, max_lines: int = 2) -> list[str]:
     s = "" if s is None else str(s)
     lines = textwrap.wrap(s, width=width) or [""]
     return lines[:max_lines]
+
+def dfs_to_xlsx_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
+    """Δημιουργεί ένα Excel (.xlsx) in-memory με πολλαπλά φύλλα."""
+    mem = io.BytesIO()
+    with pd.ExcelWriter(mem, engine="openpyxl") as writer:
+        for sheet_name, df in sheets.items():
+            safe_name = str(sheet_name)[:31] or "Sheet1"
+            (df if df is not None else pd.DataFrame()).to_excel(writer, index=False, sheet_name=safe_name)
+    mem.seek(0)
+    return mem.getvalue()
+
 
 
 # =========================
@@ -1195,6 +1206,25 @@ def render_summary() -> None:
     st.markdown("### Ανά προϊόν (για κατάστημα)")
     st.dataframe(by_product.rename(columns={"product": "Προϊόν", "qty": "Ποσότητα", "total": "Σύνολο (€)"}), use_container_width=True)
 
+    st.divider()
+    st.markdown("### Excel αναφορές")
+
+    excel_bytes = dfs_to_xlsx_bytes({
+        "Ανά μαθητή": by_student,
+        "Ανά τάξη": by_class,
+        "Ανά σχολείο": by_school,
+        "Ανά προϊόν": by_product.rename(columns={"product": "Προϊόν", "qty": "Ποσότητα", "total": "Σύνολο (€)"}),
+    })
+
+    st.download_button(
+        "⬇️ Λήψη Excel (όλες οι αναφορές)",
+        data=excel_bytes,
+        file_name=f"αναφορές_{d_from}_{d_to}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_excel_all_reports",
+    )
+
+
     # PDF buttons
     st.divider()
     st.markdown("### PDF αναφορές (fixed, minimal)")
@@ -1274,6 +1304,24 @@ def render_bulletins() -> None:
         }),
         use_container_width=True,
     )
+
+    st.download_button(
+        "⬇️ Λήψη Excel (δελτίο – όπως φαίνεται)",
+        data=dfs_to_xlsx_bytes({
+            "Δελτίο": detail.rename(columns={
+                "student": "Μαθητής/-τρια",
+                "school": "Σχολείο",
+                "product": "Προϊόν",
+                "unit_price": "Τιμή (€)",
+                "qty": "Ποσότητα",
+                "total": "Σύνολο (€)",
+            })
+        }),
+        file_name=f"δελτίο_{d_from}_{d_to}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_excel_bulletin",
+    )
+
 
     if st.button("📄 Εξαγωγή PDF (ομαδοποίηση ανά σχολείο/μαθητή)"):
         pdfbuf = pdf_bulletin_grouped(detail, "Δελτίο Παραγγελιών", st.session_state.get("logo_bytes"),

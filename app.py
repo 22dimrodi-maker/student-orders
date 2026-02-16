@@ -66,23 +66,59 @@ except Exception:
 
 
 # =========================
-# Paths
+# Paths (Cloud-safe)
 # =========================
-DATA_DIR = Path(".")
-PRODUCTS_PATH = DATA_DIR / "products.csv"
-STUDENTS_PATH = DATA_DIR / "students.csv"
-ORDERS_PATH = DATA_DIR / "orders.csv"
-BACKUPS_DIR = DATA_DIR / "backups"
+# Streamlit Cloud filesystem can reset across deploys/reboots.
+# We keep a *baseline* copy in the repo under ./seed/ (committed),
+# and we always READ/WRITE the live data under /tmp/student-orders/.
+REPO_DIR = Path(__file__).resolve().parent
+SEED_DIR = REPO_DIR / "seed"  # commit seed/orders.csv, seed/students.csv, seed/products.csv
+RUNTIME_DIR = Path("/tmp/student-orders")
+
+PRODUCTS_PATH = RUNTIME_DIR / "products.csv"
+STUDENTS_PATH = RUNTIME_DIR / "students.csv"
+ORDERS_PATH = RUNTIME_DIR / "orders.csv"
+
+BACKUPS_DIR = RUNTIME_DIR / "backups"
 LAST_BACKUP_PATH = BACKUPS_DIR / "last_backup.txt"
-REPO_LOGO_PATH = DATA_DIR / "logo.png"  # optional file in repo root
+
+REPO_LOGO_PATH = REPO_DIR / "logo.png"  # optional file in repo root
 
 
 # =========================
 # File init
 # =========================
 def ensure_files() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # runtime dirs
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     BACKUPS_DIR.mkdir(exist_ok=True)
+
+    # seed dir (repo baseline)
+    SEED_DIR.mkdir(exist_ok=True)
+
+    def _seed_or_empty(seed_path: Path, runtime_path: Path, empty_df: pd.DataFrame) -> None:
+        """If runtime file missing, copy from seed; otherwise create empty."""
+        if runtime_path.exists():
+            return
+        if seed_path.exists():
+            try:
+                runtime_path.write_bytes(seed_path.read_bytes())
+                return
+            except Exception:
+                pass
+        empty_df.to_csv(runtime_path, index=False, encoding="utf-8-sig")
+
+    _seed_or_empty(SEED_DIR / "products.csv", PRODUCTS_PATH, pd.DataFrame(columns=["product", "price"]))
+    _seed_or_empty(SEED_DIR / "students.csv", STUDENTS_PATH, pd.DataFrame(columns=["student", "school", "class"]))
+    _seed_or_empty(
+        SEED_DIR / "orders.csv",
+        ORDERS_PATH,
+        pd.DataFrame(columns=[
+            "order_id", "date", "student", "school", "class",
+            "product", "qty", "unit_price", "total"
+        ]),
+    )
+
 
     if not PRODUCTS_PATH.exists():
         pd.DataFrame(columns=["product", "price"]).to_csv(PRODUCTS_PATH, index=False, encoding="utf-8-sig")
@@ -211,17 +247,6 @@ def wrap_lines(s: str, width: int, max_lines: int = 2) -> list[str]:
     lines = textwrap.wrap(s, width=width) or [""]
     return lines[:max_lines]
 
-def dfs_to_xlsx_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
-    """Δημιουργεί ένα Excel (.xlsx) in-memory με πολλαπλά φύλλα."""
-    mem = io.BytesIO()
-    with pd.ExcelWriter(mem, engine="openpyxl") as writer:
-        for sheet_name, df in sheets.items():
-            safe_name = str(sheet_name)[:31] or "Sheet1"
-            (df if df is not None else pd.DataFrame()).to_excel(writer, index=False, sheet_name=safe_name)
-    mem.seek(0)
-    return mem.getvalue()
-
-
 
 # =========================
 # Backup / Restore
@@ -244,37 +269,14 @@ def _write_last_backup_ts(ts: str) -> None:
 
 
 def make_backup_zip() -> tuple[bytes, str]:
-    """
-    Δημιουργεί backup ZIP από ΤΑ ΤΡΕΧΟΝΤΑ δεδομένα (DataFrames) και όχι με απλή ανάγνωση αρχείων.
-    Αυτό προστατεύει από περιπτώσεις όπου το repo/deploy έχει αντικαταστήσει τα CSV στον δίσκο.
-    """
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Πάντα από τα loaders (ώστε να πάρουμε ό,τι "βλέπει" η εφαρμογή τώρα)
-    orders_df = load_orders().copy()
-    students_df = load_students().copy()
-    products_df = load_products().copy()
-
-    info = {
-        "created_at": ts,
-        "files": ["orders.csv", "students.csv", "products.csv"],
-        "counts": {
-            "orders_rows": int(len(orders_df)),
-            "students_rows": int(len(students_df)),
-            "products_rows": int(len(products_df)),
-        },
-    }
-
-    def _csv_bytes(df: pd.DataFrame) -> bytes:
-        return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-
+    info = {"created_at": ts, "files": ["orders.csv", "students.csv", "products.csv"]}
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("orders.csv", _csv_bytes(orders_df))
-        zf.writestr("students.csv", _csv_bytes(students_df))
-        zf.writestr("products.csv", _csv_bytes(products_df))
+        zf.writestr("orders.csv", ORDERS_PATH.read_bytes() if ORDERS_PATH.exists() else b"")
+        zf.writestr("students.csv", STUDENTS_PATH.read_bytes() if STUDENTS_PATH.exists() else b"")
+        zf.writestr("products.csv", PRODUCTS_PATH.read_bytes() if PRODUCTS_PATH.exists() else b"")
         zf.writestr("backup_info.json", json.dumps(info, ensure_ascii=False, indent=2).encode("utf-8"))
-
     mem.seek(0)
     _write_last_backup_ts(ts)
     return mem.getvalue(), ts
@@ -1229,25 +1231,6 @@ def render_summary() -> None:
     st.markdown("### Ανά προϊόν (για κατάστημα)")
     st.dataframe(by_product.rename(columns={"product": "Προϊόν", "qty": "Ποσότητα", "total": "Σύνολο (€)"}), use_container_width=True)
 
-    st.divider()
-    st.markdown("### Excel αναφορές")
-
-    excel_bytes = dfs_to_xlsx_bytes({
-        "Ανά μαθητή": by_student,
-        "Ανά τάξη": by_class,
-        "Ανά σχολείο": by_school,
-        "Ανά προϊόν": by_product.rename(columns={"product": "Προϊόν", "qty": "Ποσότητα", "total": "Σύνολο (€)"}),
-    })
-
-    st.download_button(
-        "⬇️ Λήψη Excel (όλες οι αναφορές)",
-        data=excel_bytes,
-        file_name=f"αναφορές_{d_from}_{d_to}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dl_excel_all_reports",
-    )
-
-
     # PDF buttons
     st.divider()
     st.markdown("### PDF αναφορές (fixed, minimal)")
@@ -1328,24 +1311,6 @@ def render_bulletins() -> None:
         use_container_width=True,
     )
 
-    st.download_button(
-        "⬇️ Λήψη Excel (δελτίο – όπως φαίνεται)",
-        data=dfs_to_xlsx_bytes({
-            "Δελτίο": detail.rename(columns={
-                "student": "Μαθητής/-τρια",
-                "school": "Σχολείο",
-                "product": "Προϊόν",
-                "unit_price": "Τιμή (€)",
-                "qty": "Ποσότητα",
-                "total": "Σύνολο (€)",
-            })
-        }),
-        file_name=f"δελτίο_{d_from}_{d_to}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dl_excel_bulletin",
-    )
-
-
     if st.button("📄 Εξαγωγή PDF (ομαδοποίηση ανά σχολείο/μαθητή)"):
         pdfbuf = pdf_bulletin_grouped(detail, "Δελτίο Παραγγελιών", st.session_state.get("logo_bytes"),
                                       st.session_state.get("app_url",""), st.session_state.get("qr_enabled", False))
@@ -1382,6 +1347,24 @@ def render_backup() -> None:
 
     st.divider()
     st.markdown("### Επαναφορά από backup ZIP")
+    st.markdown("#### Επαναφορά από baseline (seed)")
+    st.caption("Χρήσιμο όταν το Streamlit Cloud «ξεχάσει» τα τοπικά αρχεία. Θα αντιγράψει τα seed/*.csv από το GitHub στο /tmp.")
+    if st.button("↩️ Επαναφορά από seed (GitHub)"):
+        try:
+            for fn in ["orders.csv", "students.csv", "products.csv"]:
+                sp = SEED_DIR / fn
+                rp = RUNTIME_DIR / fn
+                if sp.exists():
+                    rp.write_bytes(sp.read_bytes())
+            _safe_clear_cache(load_orders)
+            _safe_clear_cache(load_students)
+            _safe_clear_cache(load_products)
+            st.success("✅ Επαναφέρθηκαν τα δεδομένα από το seed.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Σφάλμα: {e}")
+    
+
     up = st.file_uploader("Ανέβασε backup ZIP", type=["zip"], key="up_restore_zip")
     confirm = st.checkbox("✅ Επιβεβαιώνω ότι η επαναφορά θα αντικαταστήσει τα τρέχοντα δεδομένα", key="conf_restore_zip")
     if up is not None and confirm:

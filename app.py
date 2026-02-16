@@ -244,14 +244,37 @@ def _write_last_backup_ts(ts: str) -> None:
 
 
 def make_backup_zip() -> tuple[bytes, str]:
+    """
+    Δημιουργεί backup ZIP από ΤΑ ΤΡΕΧΟΝΤΑ δεδομένα (DataFrames) και όχι με απλή ανάγνωση αρχείων.
+    Αυτό προστατεύει από περιπτώσεις όπου το repo/deploy έχει αντικαταστήσει τα CSV στον δίσκο.
+    """
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    info = {"created_at": ts, "files": ["orders.csv", "students.csv", "products.csv"]}
+
+    # Πάντα από τα loaders (ώστε να πάρουμε ό,τι "βλέπει" η εφαρμογή τώρα)
+    orders_df = load_orders().copy()
+    students_df = load_students().copy()
+    products_df = load_products().copy()
+
+    info = {
+        "created_at": ts,
+        "files": ["orders.csv", "students.csv", "products.csv"],
+        "counts": {
+            "orders_rows": int(len(orders_df)),
+            "students_rows": int(len(students_df)),
+            "products_rows": int(len(products_df)),
+        },
+    }
+
+    def _csv_bytes(df: pd.DataFrame) -> bytes:
+        return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("orders.csv", ORDERS_PATH.read_bytes() if ORDERS_PATH.exists() else b"")
-        zf.writestr("students.csv", STUDENTS_PATH.read_bytes() if STUDENTS_PATH.exists() else b"")
-        zf.writestr("products.csv", PRODUCTS_PATH.read_bytes() if PRODUCTS_PATH.exists() else b"")
+        zf.writestr("orders.csv", _csv_bytes(orders_df))
+        zf.writestr("students.csv", _csv_bytes(students_df))
+        zf.writestr("products.csv", _csv_bytes(products_df))
         zf.writestr("backup_info.json", json.dumps(info, ensure_ascii=False, indent=2).encode("utf-8"))
+
     mem.seek(0)
     _write_last_backup_ts(ts)
     return mem.getvalue(), ts
